@@ -2,6 +2,8 @@
 
 This directory contains conformance test implementations for the TypeScript MCP SDK.
 
+> `@modelcontextprotocol/conformance` is pinned to an exact version (no `^` range) in `package.json`. New conformance releases are adopted by deliberately bumping the pin and updating `expected-failures.yaml` for any new scenarios/checks in the same change.
+
 ## Client Conformance Tests
 
 Tests the SDK's client implementation against a conformance test server.
@@ -58,10 +60,28 @@ npx @modelcontextprotocol/conformance server \
   --scenario server-initialize
 ```
 
+Note: `pnpm run test:conformance:server` always starts (and tests) its own server, and refuses to run while anything is still listening on its port. Stop the manually started server first, or keep using the direct `--url` invocation above against it.
+
 ## Files
 
-- `everything-client.ts` - Client that handles all client conformance scenarios
-- `everything-server.ts` - Server that implements all server conformance features
-- `helpers/` - Shared utilities for conformance tests
+- `src/everythingClient.ts` - Client that handles all client conformance scenarios
+- `src/everythingServer.ts` - Server that implements all server conformance features
+- `src/authTestServer.ts` - Server with OAuth authentication for auth conformance tests
+- `src/helpers/` - Shared utilities for conformance tests
+- `scripts/` - Conformance test runner scripts
 
-Scripts are in `scripts/` at the repo root.
+## Auth Test Server
+
+The `authTestServer.ts` is designed for testing server-side OAuth implementation. It requires an authorization server URL and validates tokens via introspection.
+
+```bash
+# Start with a fake auth server
+MCP_CONFORMANCE_AUTH_SERVER_URL=http://localhost:3000 \
+  npx tsx src/authTestServer.ts
+```
+
+The server:
+
+- Requires Bearer token authentication on all MCP endpoints
+- Validates tokens via the AS's introspection endpoint (RFC 7662)
+- Serves Protected Resource Metadata at `/.well-known/oauth-protected-resource`

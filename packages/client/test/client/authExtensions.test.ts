@@ -1,14 +1,15 @@
 import { createMockOAuthFetch } from '@modelcontextprotocol/test-helpers';
 import { describe, expect, it, vi } from 'vitest';
 
-import { auth } from '../../src/client/auth.js';
+import type { OAuthClientProvider } from '../../src/client/auth';
+import { auth } from '../../src/client/auth';
 import {
     ClientCredentialsProvider,
     createPrivateKeyJwtAuth,
     CrossAppAccessProvider,
     PrivateKeyJwtProvider,
     StaticPrivateKeyJwtProvider
-} from '../../src/client/authExtensions.js';
+} from '../../src/client/authExtensions';
 
 const RESOURCE_SERVER_URL = 'https://resource.example.com/';
 const AUTH_SERVER_URL = 'https://auth.example.com';
@@ -16,6 +17,7 @@ const AUTH_SERVER_URL = 'https://auth.example.com';
 describe('auth-extensions providers (end-to-end with auth())', () => {
     it('authenticates using ClientCredentialsProvider with client_secret_basic', async () => {
         const provider = new ClientCredentialsProvider({
+            expectedIssuer: AUTH_SERVER_URL,
             clientId: 'my-client',
             clientSecret: 'my-secret',
             clientName: 'test-client'
@@ -51,8 +53,39 @@ describe('auth-extensions providers (end-to-end with auth())', () => {
         expect(tokens?.access_token).toBe('test-access-token');
     });
 
+    it('sends scope in token request when ClientCredentialsProvider is configured with scope', async () => {
+        const provider = new ClientCredentialsProvider({
+            expectedIssuer: AUTH_SERVER_URL,
+            clientId: 'my-client',
+            clientSecret: 'my-secret',
+            clientName: 'test-client',
+            scope: 'read write'
+        });
+
+        expect(provider.clientMetadata.scope).toBe('read write');
+
+        const fetchMock = createMockOAuthFetch({
+            resourceServerUrl: RESOURCE_SERVER_URL,
+            authServerUrl: AUTH_SERVER_URL,
+            onTokenRequest: async (_url, init) => {
+                const params = init?.body as URLSearchParams;
+                expect(params).toBeInstanceOf(URLSearchParams);
+                expect(params.get('grant_type')).toBe('client_credentials');
+                expect(params.get('scope')).toBe('read write');
+            }
+        });
+
+        const result = await auth(provider, {
+            serverUrl: RESOURCE_SERVER_URL,
+            fetchFn: fetchMock
+        });
+
+        expect(result).toBe('AUTHORIZED');
+    });
+
     it('authenticates using PrivateKeyJwtProvider with private_key_jwt', async () => {
         const provider = new PrivateKeyJwtProvider({
+            expectedIssuer: AUTH_SERVER_URL,
             clientId: 'client-id',
             privateKey: 'a-string-secret-at-least-256-bits-long',
             algorithm: 'HS256',
@@ -94,8 +127,42 @@ describe('auth-extensions providers (end-to-end with auth())', () => {
         expect(assertionFromRequest).toBeTruthy();
     });
 
+    it('sends scope in token request when PrivateKeyJwtProvider is configured with scope', async () => {
+        const provider = new PrivateKeyJwtProvider({
+            expectedIssuer: AUTH_SERVER_URL,
+            clientId: 'client-id',
+            privateKey: 'a-string-secret-at-least-256-bits-long',
+            algorithm: 'HS256',
+            clientName: 'private-key-jwt-client',
+            scope: 'openid profile'
+        });
+
+        expect(provider.clientMetadata.scope).toBe('openid profile');
+
+        const fetchMock = createMockOAuthFetch({
+            resourceServerUrl: RESOURCE_SERVER_URL,
+            authServerUrl: AUTH_SERVER_URL,
+            onTokenRequest: async (_url, init) => {
+                const params = init?.body as URLSearchParams;
+                expect(params).toBeInstanceOf(URLSearchParams);
+                expect(params.get('grant_type')).toBe('client_credentials');
+                expect(params.get('scope')).toBe('openid profile');
+                expect(params.get('client_assertion')).toBeTruthy();
+                expect(params.get('client_assertion_type')).toBe('urn:ietf:params:oauth:client-assertion-type:jwt-bearer');
+            }
+        });
+
+        const result = await auth(provider, {
+            serverUrl: RESOURCE_SERVER_URL,
+            fetchFn: fetchMock
+        });
+
+        expect(result).toBe('AUTHORIZED');
+    });
+
     it('fails when PrivateKeyJwtProvider is configured with an unsupported algorithm', async () => {
         const provider = new PrivateKeyJwtProvider({
+            expectedIssuer: AUTH_SERVER_URL,
             clientId: 'client-id',
             privateKey: 'a-string-secret-at-least-256-bits-long',
             algorithm: 'none',
@@ -119,6 +186,7 @@ describe('auth-extensions providers (end-to-end with auth())', () => {
         const staticAssertion = 'header.payload.signature';
 
         const provider = new StaticPrivateKeyJwtProvider({
+            expectedIssuer: AUTH_SERVER_URL,
             clientId: 'static-client',
             jwtBearerAssertion: staticAssertion,
             clientName: 'static-private-key-jwt-client'
@@ -150,6 +218,69 @@ describe('auth-extensions providers (end-to-end with auth())', () => {
         const tokens = provider.tokens();
         expect(tokens).toBeTruthy();
         expect(tokens?.access_token).toBe('test-access-token');
+    });
+
+    it('sends scope in token request when StaticPrivateKeyJwtProvider is configured with scope', async () => {
+        const staticAssertion = 'header.payload.signature';
+
+        const provider = new StaticPrivateKeyJwtProvider({
+            expectedIssuer: AUTH_SERVER_URL,
+            clientId: 'static-client',
+            jwtBearerAssertion: staticAssertion,
+            clientName: 'static-private-key-jwt-client',
+            scope: 'api:read api:write'
+        });
+
+        expect(provider.clientMetadata.scope).toBe('api:read api:write');
+
+        const fetchMock = createMockOAuthFetch({
+            resourceServerUrl: RESOURCE_SERVER_URL,
+            authServerUrl: AUTH_SERVER_URL,
+            onTokenRequest: async (_url, init) => {
+                const params = init?.body as URLSearchParams;
+                expect(params).toBeInstanceOf(URLSearchParams);
+                expect(params.get('grant_type')).toBe('client_credentials');
+                expect(params.get('scope')).toBe('api:read api:write');
+                expect(params.get('client_assertion')).toBe(staticAssertion);
+                expect(params.get('client_assertion_type')).toBe('urn:ietf:params:oauth:client-assertion-type:jwt-bearer');
+            }
+        });
+
+        const result = await auth(provider, {
+            serverUrl: RESOURCE_SERVER_URL,
+            fetchFn: fetchMock
+        });
+
+        expect(result).toBe('AUTHORIZED');
+    });
+});
+
+describe('expectedIssuer', () => {
+    const providers: Array<[string, (options: { expectedIssuer?: string }) => OAuthClientProvider]> = [
+        ['ClientCredentialsProvider', o => new ClientCredentialsProvider({ clientId: 'c', clientSecret: 's', ...o })],
+        ['PrivateKeyJwtProvider', o => new PrivateKeyJwtProvider({ clientId: 'c', privateKey: 'k'.repeat(64), algorithm: 'HS256', ...o })],
+        ['StaticPrivateKeyJwtProvider', o => new StaticPrivateKeyJwtProvider({ clientId: 'c', jwtBearerAssertion: 'a', ...o })],
+        ['CrossAppAccessProvider', o => new CrossAppAccessProvider({ assertion: async () => 'g', clientId: 'c', clientSecret: 's', ...o })]
+    ];
+
+    it.each(providers)('%s logs one deprecation message at construction when it is omitted', async (_name, create) => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const fetchFn = createMockOAuthFetch({ resourceServerUrl: RESOURCE_SERVER_URL, authServerUrl: AUTH_SERVER_URL });
+
+        create({ expectedIssuer: AUTH_SERVER_URL });
+        expect(warn).not.toHaveBeenCalled();
+
+        const provider = create({});
+        expect(await auth(provider, { serverUrl: RESOURCE_SERVER_URL, fetchFn })).toBe('AUTHORIZED');
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('Omitting `expectedIssuer` is deprecated'));
+        warn.mockRestore();
+    });
+
+    it.each([null, '', 42, new URL(AUTH_SERVER_URL)])('rejects %j at construction', value => {
+        expect(() => new ClientCredentialsProvider({ clientId: 'c', clientSecret: 's', expectedIssuer: value as string })).toThrow(
+            'expectedIssuer must be'
+        );
     });
 });
 
@@ -330,6 +461,50 @@ describe('createPrivateKeyJwtAuth', () => {
             /Key for the RS256 algorithm must be one of type CryptoKey, KeyObject, or JSON Web Key/
         );
     });
+
+    it('includes custom claims in the signed JWT assertion', async () => {
+        const addClientAuth = createPrivateKeyJwtAuth({
+            issuer: 'client-id',
+            subject: 'client-id',
+            privateKey: 'a-string-secret-at-least-256-bits-long',
+            alg: 'HS256',
+            claims: { tenant_id: 'org-123', role: 'admin' }
+        });
+
+        const params = new URLSearchParams();
+        await addClientAuth(new Headers(), params, 'https://auth.example.com/token', undefined);
+
+        const assertion = params.get('client_assertion');
+        expect(assertion).toBeTruthy();
+
+        const jose = await import('jose');
+        const decoded = jose.decodeJwt(assertion!);
+        expect(decoded.tenant_id).toBe('org-123');
+        expect(decoded.role).toBe('admin');
+        expect(decoded.iss).toBe('client-id');
+        expect(decoded.sub).toBe('client-id');
+    });
+
+    it('passes custom claims through PrivateKeyJwtProvider', async () => {
+        const provider = new PrivateKeyJwtProvider({
+            expectedIssuer: AUTH_SERVER_URL,
+            clientId: 'client-id',
+            privateKey: 'a-string-secret-at-least-256-bits-long',
+            algorithm: 'HS256',
+            claims: { tenant_id: 'org-456' }
+        });
+
+        const params = new URLSearchParams();
+        await provider.addClientAuthentication(new Headers(), params, 'https://auth.example.com/token', undefined);
+
+        const assertion = params.get('client_assertion');
+        expect(assertion).toBeTruthy();
+
+        const jose = await import('jose');
+        const decoded = jose.decodeJwt(assertion!);
+        expect(decoded.tenant_id).toBe('org-456');
+        expect(decoded.iss).toBe('client-id');
+    });
 });
 
 describe('CrossAppAccessProvider', () => {
@@ -350,6 +525,7 @@ describe('CrossAppAccessProvider', () => {
                 expect(ctx.fetchFn).toBeDefined();
                 return 'jwt-authorization-grant-token';
             },
+            expectedIssuer: AUTH_SERVER_URL,
             clientId: 'my-mcp-client',
             clientSecret: 'my-mcp-secret',
             clientName: 'xaa-test-client'
@@ -398,6 +574,7 @@ describe('CrossAppAccessProvider', () => {
                 capturedScope = ctx.scope;
                 return 'jwt-grant';
             },
+            expectedIssuer: AUTH_SERVER_URL,
             clientId: 'client',
             clientSecret: 'secret'
         });
@@ -433,6 +610,7 @@ describe('CrossAppAccessProvider', () => {
                 capturedFetchFn = ctx.fetchFn;
                 return 'jwt-grant';
             },
+            expectedIssuer: AUTH_SERVER_URL,
             clientId: 'client',
             clientSecret: 'secret',
             fetchFn: customFetch
@@ -450,6 +628,7 @@ describe('CrossAppAccessProvider', () => {
     it('throws error when authorization server URL is not available', async () => {
         const provider = new CrossAppAccessProvider({
             assertion: async () => 'jwt-grant',
+            expectedIssuer: AUTH_SERVER_URL,
             clientId: 'client',
             clientSecret: 'secret'
         });
@@ -463,6 +642,7 @@ describe('CrossAppAccessProvider', () => {
     it('throws error when resource URL is not available', async () => {
         const provider = new CrossAppAccessProvider({
             assertion: async () => 'jwt-grant',
+            expectedIssuer: AUTH_SERVER_URL,
             clientId: 'client',
             clientSecret: 'secret'
         });
@@ -478,6 +658,7 @@ describe('CrossAppAccessProvider', () => {
     it('stores and retrieves authorization server URL', () => {
         const provider = new CrossAppAccessProvider({
             assertion: async () => 'jwt-grant',
+            expectedIssuer: AUTH_SERVER_URL,
             clientId: 'client',
             clientSecret: 'secret'
         });
@@ -491,6 +672,7 @@ describe('CrossAppAccessProvider', () => {
     it('stores and retrieves resource URL', () => {
         const provider = new CrossAppAccessProvider({
             assertion: async () => 'jwt-grant',
+            expectedIssuer: AUTH_SERVER_URL,
             clientId: 'client',
             clientSecret: 'secret'
         });
@@ -504,6 +686,7 @@ describe('CrossAppAccessProvider', () => {
     it('has correct client metadata', () => {
         const provider = new CrossAppAccessProvider({
             assertion: async () => 'jwt-grant',
+            expectedIssuer: AUTH_SERVER_URL,
             clientId: 'client',
             clientSecret: 'secret',
             clientName: 'custom-xaa-client'
@@ -519,6 +702,7 @@ describe('CrossAppAccessProvider', () => {
     it('uses default client name when not provided', () => {
         const provider = new CrossAppAccessProvider({
             assertion: async () => 'jwt-grant',
+            expectedIssuer: AUTH_SERVER_URL,
             clientId: 'client',
             clientSecret: 'secret'
         });
@@ -529,6 +713,7 @@ describe('CrossAppAccessProvider', () => {
     it('returns undefined for redirectUrl (non-interactive flow)', () => {
         const provider = new CrossAppAccessProvider({
             assertion: async () => 'jwt-grant',
+            expectedIssuer: AUTH_SERVER_URL,
             clientId: 'client',
             clientSecret: 'secret'
         });
@@ -539,6 +724,7 @@ describe('CrossAppAccessProvider', () => {
     it('throws error for redirectToAuthorization (not used in jwt-bearer)', () => {
         const provider = new CrossAppAccessProvider({
             assertion: async () => 'jwt-grant',
+            expectedIssuer: AUTH_SERVER_URL,
             clientId: 'client',
             clientSecret: 'secret'
         });
@@ -549,6 +735,7 @@ describe('CrossAppAccessProvider', () => {
     it('throws error for codeVerifier (not used in jwt-bearer)', () => {
         const provider = new CrossAppAccessProvider({
             assertion: async () => 'jwt-grant',
+            expectedIssuer: AUTH_SERVER_URL,
             clientId: 'client',
             clientSecret: 'secret'
         });
@@ -561,6 +748,7 @@ describe('CrossAppAccessProvider', () => {
             assertion: async () => {
                 throw new Error('Failed to get ID token from IdP');
             },
+            expectedIssuer: AUTH_SERVER_URL,
             clientId: 'client',
             clientSecret: 'secret'
         });
@@ -585,6 +773,7 @@ describe('CrossAppAccessProvider', () => {
                     setTimeout(() => resolve('async-jwt-grant'), 10);
                 });
             },
+            expectedIssuer: AUTH_SERVER_URL,
             clientId: 'client',
             clientSecret: 'secret'
         });
@@ -609,6 +798,7 @@ describe('CrossAppAccessProvider', () => {
     it('includes scope in token request params when provided', async () => {
         const provider = new CrossAppAccessProvider({
             assertion: async () => 'jwt-grant',
+            expectedIssuer: AUTH_SERVER_URL,
             clientId: 'client',
             clientSecret: 'secret'
         });

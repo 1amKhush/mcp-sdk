@@ -1,20 +1,50 @@
 import type { ReadableWritablePair } from 'node:stream/web';
 
-import type { FetchLike, JSONRPCMessage, Transport } from '@modelcontextprotocol/core';
+import type { FetchLike, JSONRPCMessage, Transport } from '@modelcontextprotocol/core-internal';
 import {
     createFetchWithInit,
+    encodeMcpParamValue,
+    fetchLeavingRedirects,
+    fetchWithinOrigin,
     isInitializedNotification,
+    isInitializeRequest,
+    isJSONRPCErrorResponse,
     isJSONRPCRequest,
     isJSONRPCResultResponse,
+    isModernProtocolVersion,
     JSONRPCMessageSchema,
-    normalizeHeaders,
+    mcpNameSource,
+    mediaTypeEssence,
+    PROTOCOL_VERSION_META_KEY,
     SdkError,
-    SdkErrorCode
-} from '@modelcontextprotocol/core';
+    SdkErrorCode,
+    SdkHttpError,
+    unfollowedRedirect
+} from '@modelcontextprotocol/core-internal';
 import { EventSourceParserStream } from 'eventsource-parser/stream';
 
-import type { AuthResult, OAuthClientProvider } from './auth.js';
-import { auth, extractWWWAuthenticateParams, UnauthorizedError } from './auth.js';
+import type { AuthProvider, OAuthClientProvider } from './auth';
+import {
+    adaptOAuthProvider,
+    auth,
+    computeScopeUnion,
+    extractWWWAuthenticateParams,
+    isOAuthClientProvider,
+    isStrictScopeSuperset,
+    resolveAuthorizationCallbackParams,
+    UnauthorizedError
+} from './auth';
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- referenced via {@linkcode} in finishAuth JSDoc
+import type { IssuerMismatchError } from './authErrors';
+import { InsufficientScopeError } from './authErrors';
+import { markAuthSeamEscape } from './authSeam';
+import { withDpopFromProvider } from './middleware';
+
+/** Default cap on step-up re-authorization retries within a single send/stream-open. */
+const DEFAULT_MAX_STEP_UP_RETRIES = 1;
+
+/** The parsed 403 `insufficient_scope` challenge handed to the step-up flow. */
+type StepUpChallenge = { scope?: string; resourceMetadataUrl?: URL; errorDescription?: string; statusText?: string; text?: string | null };
 
 // Default reconnection options for StreamableHTTP connections
 const DEFAULT_STREAMABLE_HTTP_RECONNECTION_OPTIONS: StreamableHTTPReconnectionOptions = {
@@ -47,6 +77,24 @@ export interface StartSSEOptions {
      * so that the response can be associated with the new resumed request.
      */
     replayMessageId?: string | number;
+
+    /**
+     * The per-request abort signal supplied by the caller via
+     * `TransportSendOptions.requestSignal`. When this signal is aborted the
+     * originating POST and its SSE response stream are torn down
+     * intentionally — `_handleSseStream` treats it exactly like the
+     * transport-level abort: no `onerror`, no reconnect.
+     */
+    requestSignal?: AbortSignal;
+
+    /**
+     * The per-request stream-end callback supplied via
+     * `TransportSendOptions.onRequestStreamEnd`. Fired when the SSE response
+     * stream for the originating POST ends or errors for any non-deliberate
+     * reason (server closed, network dropped, reconnection exhausted) — never
+     * when `requestSignal` was aborted.
+     */
+    onRequestStreamEnd?: () => void;
 }
 
 /**
@@ -79,27 +127,76 @@ export interface StreamableHTTPReconnectionOptions {
 }
 
 /**
+ * Custom scheduler for SSE stream reconnection attempts.
+ *
+ * Called instead of `setTimeout` when the transport needs to schedule a reconnection.
+ * Useful in environments where `setTimeout` is unsuitable (serverless functions that
+ * terminate before the timer fires, mobile apps that need platform background scheduling,
+ * desktop apps handling sleep/wake).
+ *
+ * @param reconnect - Call this to perform the reconnection attempt.
+ * @param delay - Suggested delay in milliseconds (from backoff calculation).
+ * @param attemptCount - Zero-indexed retry attempt number.
+ * @returns An optional cancel function. If returned, it will be called on
+ * {@linkcode StreamableHTTPClientTransport.close | transport.close()} to abort the
+ * pending reconnection.
+ *
+ * @example
+ * ```ts source="./streamableHttp.examples.ts#ReconnectionScheduler_basicUsage"
+ * const scheduler: ReconnectionScheduler = (reconnect, delay) => {
+ *     const id = platformBackgroundTask.schedule(reconnect, delay);
+ *     return () => platformBackgroundTask.cancel(id);
+ * };
+ * ```
+ */
+export type ReconnectionScheduler = (reconnect: () => void, delay: number, attemptCount: number) => (() => void) | void;
+
+/**
  * Configuration options for the {@linkcode StreamableHTTPClientTransport}.
  */
 export type StreamableHTTPClientTransportOptions = {
     /**
      * An OAuth client provider to use for authentication.
      *
-     * When an `authProvider` is specified and the connection is started:
-     * 1. The connection is attempted with any existing access token from the `authProvider`.
-     * 2. If the access token has expired, the `authProvider` is used to refresh the token.
-     * 3. If token refresh fails or no access token exists, and auth is required, {@linkcode OAuthClientProvider.redirectToAuthorization} is called, and an {@linkcode UnauthorizedError} will be thrown from {@linkcode index.Protocol.connect | connect}/{@linkcode StreamableHTTPClientTransport.start | start}.
+     * {@linkcode AuthProvider.token | token()} is called before every request to obtain the
+     * bearer token. When the server responds with 401, {@linkcode AuthProvider.onUnauthorized | onUnauthorized()}
+     * is called (if provided) to refresh credentials, then the request is retried once. If
+     * the retry also gets 401, `SdkHttpError` (`SdkErrorCode.ClientHttpAuthentication`) is thrown.
+     * If `onUnauthorized` is not provided, {@linkcode UnauthorizedError} is thrown.
      *
-     * After the user has finished authorizing via their user agent, and is redirected back to the MCP client application, call {@linkcode StreamableHTTPClientTransport.finishAuth} with the authorization code before retrying the connection.
+     * For simple bearer tokens: `{ token: async () => myApiKey }`.
      *
-     * If an `authProvider` is not provided, and auth is required, an {@linkcode UnauthorizedError} will be thrown.
-     *
-     * {@linkcode UnauthorizedError} might also be thrown when sending any message over the transport, indicating that the session has expired, and needs to be re-authed and reconnected.
+     * For OAuth flows, pass an {@linkcode index.OAuthClientProvider | OAuthClientProvider} implementation
+     * directly — the transport adapts it to `AuthProvider` internally. Interactive flows: after
+     * {@linkcode UnauthorizedError}, redirect the user, then call
+     * {@linkcode StreamableHTTPClientTransport.finishAuth | finishAuth} with the authorization code before
+     * reconnecting.
      */
-    authProvider?: OAuthClientProvider;
+    authProvider?: AuthProvider | OAuthClientProvider;
+
+    /**
+     * Opt-out for the RFC 8414 §3.3 issuer-echo check during authorization-server
+     * metadata discovery. **Security-weakening** — see
+     * {@linkcode index.AuthOptions.skipIssuerMetadataValidation | AuthOptions.skipIssuerMetadataValidation}.
+     * Only honoured when {@linkcode StreamableHTTPClientTransportOptions.authProvider | authProvider}
+     * is an `OAuthClientProvider`.
+     */
+    skipIssuerMetadataValidation?: boolean;
 
     /**
      * Customizes HTTP requests to the server.
+     *
+     * `headers` are sent on every request, but the transport-managed headers take
+     * precedence over a same-named entry here: `Authorization` when
+     * {@linkcode StreamableHTTPClientTransportOptions.authProvider | authProvider} yields a
+     * token, `mcp-session-id`, and `mcp-protocol-version`. A caller-supplied `Authorization`
+     * value is therefore only sent while the provider has no token, which lets a static API
+     * key fall back to OAuth once the provider obtains one.
+     *
+     * A `redirect` of `'error'` or `'manual'` is passed to fetch as it is for the POST, GET and
+     * DELETE requests to the server URL. For the OAuth requests, and for any other value,
+     * `redirect` is consulted only when
+     * {@linkcode StreamableHTTPClientTransportOptions.redirectPolicy | redirectPolicy} is `'follow'`.
      */
     requestInit?: RequestInit;
 
@@ -109,16 +206,134 @@ export type StreamableHTTPClientTransportOptions = {
     fetch?: FetchLike;
 
     /**
+     * How a redirect of one of the transport's requests is handled, including the OAuth
+     * requests it makes for {@linkcode StreamableHTTPClientTransportOptions.authProvider | authProvider}.
+     * The option does not reach requests that a provider makes with a fetch of its own, such as
+     * those of the `assertion` callback of a `CrossAppAccessProvider`.
+     *
+     * - `'same-origin'` (default): a redirect is followed only when it stays within the origin
+     *   of the request and keeps the method, and any other redirect fails the request.
+     * - `'follow'`: redirects are left to the fetch implementation, as in earlier versions. It
+     *   follows them to any origin unless `requestInit.redirect` says otherwise.
+     *
+     * @default 'same-origin'
+     */
+    redirectPolicy?: 'same-origin' | 'follow';
+
+    /**
      * Options to configure the reconnection behavior.
      */
     reconnectionOptions?: StreamableHTTPReconnectionOptions;
+
+    /**
+     * Custom scheduler for reconnection attempts. If not provided, `setTimeout` is used.
+     * See {@linkcode ReconnectionScheduler}.
+     */
+    reconnectionScheduler?: ReconnectionScheduler;
 
     /**
      * Session ID for the connection. This is used to identify the session on the server.
      * When not provided and connecting to a server that supports session IDs, the server will generate a new session ID.
      */
     sessionId?: string;
+
+    /**
+     * The MCP protocol version to include in the `mcp-protocol-version` header on all requests.
+     * When reconnecting with a preserved `sessionId`, set this to the version negotiated during the original
+     * handshake so the reconnected transport continues sending the required header.
+     */
+    protocolVersion?: string;
+
+    /**
+     * How the transport reacts to a `403 Forbidden` response carrying
+     * `WWW-Authenticate: Bearer error="insufficient_scope"`.
+     *
+     * - `'reauthorize'` (default): the transport runs the step-up authorization
+     *   flow — computes the union of the previously-requested scope and the
+     *   challenged scope, calls {@linkcode index.auth | auth()} (forcing a
+     *   fresh authorization request when the union strictly exceeds the current
+     *   token's granted scope, since refresh cannot widen scope per RFC 6749
+     *   §6), and retries the request once. Retries are bounded by
+     *   {@linkcode StreamableHTTPClientTransportOptions.maxStepUpRetries | maxStepUpRetries}.
+     *   If no {@linkcode index.OAuthClientProvider | OAuthClientProvider} is
+     *   configured, step-up cannot run and the transport throws
+     *   {@linkcode index.InsufficientScopeError | InsufficientScopeError} instead.
+     * - `'throw'`: the transport throws {@linkcode index.InsufficientScopeError | InsufficientScopeError}
+     *   carrying the challenge parameters and does not re-authorize. Use this
+     *   for `client_credentials` / m2m clients where re-authorization cannot
+     *   widen scope, or for interactive clients that want to gate the consent
+     *   prompt behind UX.
+     *
+     * @default 'reauthorize'
+     */
+    onInsufficientScope?: 'reauthorize' | 'throw';
+
+    /**
+     * Maximum number of step-up re-authorization attempts the transport makes
+     * per send (and per GET stream open) before giving up. Only consulted when
+     * {@linkcode StreamableHTTPClientTransportOptions.onInsufficientScope | onInsufficientScope}
+     * is `'reauthorize'`. Cross-request tracking ("this resource+operation
+     * already failed N times across the session") is host responsibility.
+     *
+     * @default 1
+     */
+    maxStepUpRetries?: number;
 };
+
+/**
+ * Standard/auth header names the transport owns. The per-request
+ * `TransportSendOptions.headers` carrier MUST NOT be able to override these —
+ * they are derived from connection state (`authorization`, `mcp-session-id`)
+ * or from the message body itself (`mcp-protocol-version`, `mcp-method`,
+ * `mcp-name`), and a per-request override would let a caller produce a
+ * header/body disagreement the server's SEP-2243 cross-checks reject.
+ */
+const RESERVED_REQUEST_HEADER_NAMES: ReadonlySet<string> = new Set([
+    'authorization',
+    'dpop',
+    'content-type',
+    'mcp-protocol-version',
+    'mcp-method',
+    'mcp-name',
+    'mcp-session-id'
+]);
+
+/**
+ * `AbortSignal.any` with a manual fallback. `AbortSignal.any` landed in
+ * Node 20.3; this package's `engines` floor is `>=20`, so 20.0–20.2 must be
+ * served by the fallback combinator (a controller that aborts on the first
+ * of `a` or `b`). The native path is preferred because it propagates the
+ * originating signal's `reason` and participates in GC the way the spec
+ * defines.
+ */
+function anySignal(a: AbortSignal, b: AbortSignal): AbortSignal {
+    if (typeof AbortSignal.any === 'function') {
+        return AbortSignal.any([a, b]);
+    }
+    const controller = new AbortController();
+    if (a.aborted) return (controller.abort(a.reason), controller.signal);
+    if (b.aborted) return (controller.abort(b.reason), controller.signal);
+    // Standard polyfill shape: when EITHER input fires, remove the listener
+    // registered on the OTHER input too. `{once:true}` alone leaks the
+    // sibling listener — for `_send()`, `a` is the transport-lifetime signal,
+    // so every request-scoped `b` that aborts would otherwise leave one
+    // listener + closure pinned on `a` for the life of the transport.
+    const cleanup = (): void => {
+        a.removeEventListener('abort', onA);
+        b.removeEventListener('abort', onB);
+    };
+    function onA(): void {
+        cleanup();
+        controller.abort(a.reason);
+    }
+    function onB(): void {
+        cleanup();
+        controller.abort(b.reason);
+    }
+    a.addEventListener('abort', onA, { once: true });
+    b.addEventListener('abort', onB, { once: true });
+    return controller.signal;
+}
 
 /**
  * Client transport for Streamable HTTP: this implements the MCP Streamable HTTP transport specification.
@@ -131,118 +346,338 @@ export class StreamableHTTPClientTransport implements Transport {
     private _resourceMetadataUrl?: URL;
     private _scope?: string;
     private _requestInit?: RequestInit;
-    private _authProvider?: OAuthClientProvider;
+    private _authProvider?: AuthProvider;
+    private _oauthProvider?: OAuthClientProvider;
+    private _skipIssuerMetadataValidation?: boolean;
     private _fetch?: FetchLike;
     private _fetchWithInit: FetchLike;
+    private _redirectPolicy?: 'same-origin' | 'follow';
     private _sessionId?: string;
     private _reconnectionOptions: StreamableHTTPReconnectionOptions;
     private _protocolVersion?: string;
-    private _hasCompletedAuthFlow = false; // Circuit breaker: detect auth success followed by immediate 401
-    private _lastUpscopingHeader?: string; // Track last upscoping header to prevent infinite upscoping.
+    private _onInsufficientScope: 'reauthorize' | 'throw';
+    private _maxStepUpRetries: number;
     private _serverRetryMs?: number; // Server-provided retry delay from SSE retry field
-    private _reconnectionTimeout?: ReturnType<typeof setTimeout>;
+    private readonly _reconnectionScheduler?: ReconnectionScheduler;
+    private _cancelReconnection?: () => void;
 
     onclose?: () => void;
     onerror?: (error: Error) => void;
     onmessage?: (message: JSONRPCMessage) => void;
+
+    /**
+     * Streamable HTTP opens one POST (and SSE response stream) per outbound
+     * request and honors `TransportSendOptions.requestSignal`. On a 2026-era
+     * connection the protocol layer aborts that per-request stream as the
+     * spec cancellation signal instead of POSTing `notifications/cancelled`.
+     */
+    readonly hasPerRequestStream = true;
 
     constructor(url: URL, opts?: StreamableHTTPClientTransportOptions) {
         this._url = url;
         this._resourceMetadataUrl = undefined;
         this._scope = undefined;
         this._requestInit = opts?.requestInit;
-        this._authProvider = opts?.authProvider;
+        this._skipIssuerMetadataValidation = opts?.skipIssuerMetadataValidation;
         this._fetch = opts?.fetch;
-        this._fetchWithInit = createFetchWithInit(opts?.fetch, opts?.requestInit);
-        this._sessionId = opts?.sessionId;
-        this._reconnectionOptions = opts?.reconnectionOptions ?? DEFAULT_STREAMABLE_HTTP_RECONNECTION_OPTIONS;
-    }
-
-    private async _authThenStart(): Promise<void> {
-        if (!this._authProvider) {
-            throw new UnauthorizedError('No auth provider');
-        }
-
-        let result: AuthResult;
-        try {
-            result = await auth(this._authProvider, {
-                serverUrl: this._url,
-                resourceMetadataUrl: this._resourceMetadataUrl,
-                scope: this._scope,
-                fetchFn: this._fetchWithInit
+        if (isOAuthClientProvider(opts?.authProvider)) {
+            this._oauthProvider = opts.authProvider;
+            this._authProvider = adaptOAuthProvider(opts.authProvider, {
+                skipIssuerMetadataValidation: opts.skipIssuerMetadataValidation
             });
-        } catch (error) {
-            this.onerror?.(error as Error);
-            throw error;
+            // SEP-1932 / RFC 9449: sign resource-server requests with DPoP at the fetch layer, where
+            // the real method/URL/response of every request (POST, GET stream, DELETE) is in hand.
+            // `_fetchWithInit` below (handed to `auth()`) stays unwrapped — token-endpoint DPoP is
+            // executeTokenRequest's job.
+            if (opts.authProvider.dpop) {
+                this._fetch = withDpopFromProvider(opts.authProvider)(opts.fetch ?? fetch);
+            }
+        } else {
+            this._authProvider = opts?.authProvider;
         }
-
-        if (result !== 'AUTHORIZED') {
-            throw new UnauthorizedError();
-        }
-
-        return await this._startOrAuthSse({ resumptionToken: undefined });
+        this._redirectPolicy = opts?.redirectPolicy;
+        this._fetchWithInit = createFetchWithInit(opts?.fetch, opts?.requestInit);
+        if (this._redirectPolicy === 'follow') this._fetchWithInit = fetchLeavingRedirects(this._fetchWithInit);
+        this._sessionId = opts?.sessionId;
+        this._protocolVersion = opts?.protocolVersion;
+        this._reconnectionOptions = opts?.reconnectionOptions ?? DEFAULT_STREAMABLE_HTTP_RECONNECTION_OPTIONS;
+        this._reconnectionScheduler = opts?.reconnectionScheduler;
+        this._onInsufficientScope = opts?.onInsufficientScope ?? 'reauthorize';
+        this._maxStepUpRetries = Math.max(0, opts?.maxStepUpRetries ?? DEFAULT_MAX_STEP_UP_RETRIES);
     }
 
-    private async _commonHeaders(): Promise<Headers> {
-        const headers: RequestInit['headers'] & Record<string, string> = {};
-        if (this._authProvider) {
-            const tokens = await this._authProvider.tokens();
-            if (tokens) {
-                headers['Authorization'] = `Bearer ${tokens.access_token}`;
-            }
+    /**
+     * SEP-2350 step-up: compute the union scope, decide whether refresh must be
+     * bypassed, and run {@linkcode auth}. Returns the auth result so the caller
+     * can decide whether to retry. Shared by the POST `_send` path and the GET
+     * `_startOrAuthSse` path so both apply the same `'throw'` short-circuit,
+     * the same superset-gated refresh bypass, and the same retry cap.
+     */
+    private async _stepUpAuthorize(challenge: StepUpChallenge, stepUpRetries: number): Promise<'AUTHORIZED' | 'REDIRECT'> {
+        // Auth-seam stamp, method-level: covers the InsufficientScopeError
+        // throws, the retry-limit SdkHttpError, the tokens() read, and every
+        // auth() escape (typed or not).
+        try {
+            return await this._stepUpAuthorizeInner(challenge, stepUpRetries);
+        } catch (error) {
+            throw markAuthSeamEscape(error);
+        }
+    }
+
+    private async _stepUpAuthorizeInner(challenge: StepUpChallenge, stepUpRetries: number): Promise<'AUTHORIZED' | 'REDIRECT'> {
+        if (this._onInsufficientScope === 'throw') {
+            throw new InsufficientScopeError({
+                requiredScope: challenge.scope,
+                resourceMetadataUrl: challenge.resourceMetadataUrl,
+                errorDescription: challenge.errorDescription
+            });
+        }
+        if (!this._oauthProvider) {
+            // No OAuth provider to drive step-up; surface the typed error so the
+            // host can act on it.
+            throw new InsufficientScopeError({
+                requiredScope: challenge.scope,
+                resourceMetadataUrl: challenge.resourceMetadataUrl,
+                errorDescription: challenge.errorDescription
+            });
+        }
+        if (stepUpRetries >= this._maxStepUpRetries) {
+            throw new SdkHttpError(
+                SdkErrorCode.ClientHttpForbidden,
+                `Server returned 403 insufficient_scope after step-up re-authorization (retry limit ${this._maxStepUpRetries} reached)`,
+                { status: 403, statusText: challenge.statusText ?? 'Forbidden', text: challenge.text }
+            );
         }
 
-        if (this._sessionId) {
-            headers['mcp-session-id'] = this._sessionId;
-        }
-        if (this._protocolVersion) {
-            headers['mcp-protocol-version'] = this._protocolVersion;
+        if (challenge.resourceMetadataUrl) {
+            this._resourceMetadataUrl = challenge.resourceMetadataUrl;
         }
 
-        const extraHeaders = normalizeHeaders(this._requestInit?.headers);
+        // Spec step-up: union of previously-requested scope and challenged scope,
+        // so previously-granted permissions are not lost on re-authorization.
+        const tokens = await this._oauthProvider.tokens();
+        const unionScope = computeScopeUnion(this._scope, tokens?.scope, challenge.scope);
+        this._scope = unionScope;
 
-        return new Headers({
-            ...headers,
-            ...extraHeaders
+        // Superset-gated refresh bypass: refresh cannot widen scope (RFC 6749 §6),
+        // so when the union strictly exceeds what the current token was granted
+        // we must force a fresh authorization request.
+        const forceReauthorization = isStrictScopeSuperset(unionScope, tokens?.scope);
+
+        return auth(this._oauthProvider, {
+            serverUrl: this._url,
+            resourceMetadataUrl: this._resourceMetadataUrl,
+            scope: unionScope,
+            forceReauthorization,
+            fetchFn: this._fetchWithInit,
+            skipIssuerMetadataValidation: this._skipIssuerMetadataValidation
         });
     }
 
-    private async _startOrAuthSse(options: StartSSEOptions): Promise<void> {
-        const { resumptionToken } = options;
+    /** `baseFetch` with redirects handled as `redirectPolicy` says. */
+    private _redirects(baseFetch: FetchLike): FetchLike {
+        return this._redirectPolicy === 'follow' ? baseFetch : fetchWithinOrigin(baseFetch);
+    }
+
+    /** Error text for a redirect `response` that was not followed, or `undefined` for any other response. */
+    private _unfollowedRedirect(url: string | URL, response: Response): string | undefined {
+        const text = this._redirectPolicy === 'follow' ? undefined : unfollowedRedirect(url, response);
+        return text && `${text} (redirectPolicy: 'same-origin')`;
+    }
+
+    private async _commonHeaders(): Promise<Headers> {
+        // Start from the caller-supplied `requestInit.headers` and `set()` the
+        // transport-managed headers on top. `Headers.set` compares names
+        // case-insensitively, so Authorization / mcp-session-id / mcp-protocol-version
+        // replace a same-named caller entry whatever its spelling. (A plain-object
+        // spread would keep `authorization` and `Authorization` side by side, and the
+        // Fetch `Headers` constructor would then combine them into one two-token
+        // value.) This lets a stale static `Authorization` placeholder (e.g. an env-var
+        // API key) fall back to the OAuth token once the provider has one, and mirrors
+        // the per-request `RESERVED_REQUEST_HEADER_NAMES` guard in send(). See #2208.
+        // `|| undefined` keeps the old tolerance for a falsy `headers` value (e.g. `null`
+        // from a JS caller or a JSON config forwarded verbatim): the Fetch `Headers`
+        // constructor accepts `undefined` but throws on `null`.
+        const headers = new Headers(this._requestInit?.headers || undefined);
+        let token: string | undefined;
+        try {
+            token = await this._authProvider?.token();
+        } catch (error) {
+            // Auth-seam stamp: a throwing token() is an auth failure, never a
+            // network failure.
+            throw markAuthSeamEscape(error);
+        }
+        if (token) {
+            headers.set('Authorization', `Bearer ${token}`);
+        }
+        if (this._sessionId) {
+            headers.set('mcp-session-id', this._sessionId);
+        }
+        if (this._protocolVersion) {
+            headers.set('mcp-protocol-version', this._protocolVersion);
+        }
+        return headers;
+    }
+
+    /**
+     * Body-derived per-request headers: when an outgoing request carries a
+     * protocol-version claim in its `_meta` envelope (the version negotiation
+     * probe is the first such sender), `MCP-Protocol-Version` and `Mcp-Method`
+     * derive from the message itself. The connection-level version slot is
+     * neither consulted nor mutated; messages without an envelope claim are
+     * untouched, so no 2026 header can appear on a legacy exchange.
+     */
+    private _applyBodyDerivedHeaders(headers: Headers, message: JSONRPCMessage | JSONRPCMessage[]): void {
+        if (Array.isArray(message) || !isJSONRPCRequest(message)) {
+            return;
+        }
+        const meta = (message.params as { _meta?: Record<string, unknown> } | undefined)?._meta;
+        const envelopeVersion = meta?.[PROTOCOL_VERSION_META_KEY];
+        if (typeof envelopeVersion !== 'string') {
+            return;
+        }
+        headers.set('mcp-protocol-version', envelopeVersion);
+        headers.set('mcp-method', message.method);
+        // SEP-2243 standard headers, step 2 of the 5-step client algorithm:
+        // Mcp-Name mirrors `params.name` (tools/call, prompts/get),
+        // `params.uri` (resources/read), or — per SEP-2663's Streamable HTTP
+        // binding — `params.taskId` (tasks/get, tasks/update, tasks/cancel).
+        // `mcpNameSource` resolves the method → source-field mapping and the
+        // body value through the same `MCP_NAME_HEADER_SOURCE` table and
+        // extraction the SDK server validates with, so emission and
+        // validation cannot drift apart. The value is run through the same
+        // `=?base64?…?=` sentinel encoding the `Mcp-Param-*` codec uses so a
+        // non-ASCII name/URI/taskId (or one with leading/trailing whitespace,
+        // control characters, or CR/LF) cannot make `Headers.set()` throw a
+        // TypeError or silently normalize to a value that differs from the
+        // body. The spec's value-encoding rules apply to `Mcp-Name`; the SDK
+        // server's `validateStandardRequestHeaders` decodes the sentinel via
+        // `decodeMcpParamValue` before the `Mcp-Name` ↔ body cross-check.
+        const source = mcpNameSource(message.method, message.params);
+        if (source?.value !== undefined) {
+            headers.set('mcp-name', encodeMcpParamValue(source.value));
+        }
+    }
+
+    /**
+     * `true` when the outbound message is a single request carrying a
+     * modern-era protocol-version envelope claim — the same predicate that
+     * gates body-derived `mcp-method`/`mcp-name` emission. Used to confine the
+     * 400-body-as-ProtocolError delivery to modern-era exchanges only.
+     */
+    private _isModernEnvelopedRequest(message: JSONRPCMessage | JSONRPCMessage[]): boolean {
+        if (Array.isArray(message) || !isJSONRPCRequest(message)) return false;
+        const meta = (message.params as { _meta?: Record<string, unknown> } | undefined)?._meta;
+        const v = meta?.[PROTOCOL_VERSION_META_KEY];
+        return typeof v === 'string' && isModernProtocolVersion(v);
+    }
+
+    private async _startOrAuthSse(options: StartSSEOptions, isAuthRetry = false, stepUpRetries = 0): Promise<void> {
+        const { resumptionToken, requestSignal } = options;
+        // Same guard as `_handleSseStream`: a resurrected listen stream (the
+        // POST-SSE → GET reconnect path threads `requestSignal` through
+        // `StartSSEOptions`) must honour the per-request abort exactly as the
+        // original POST did — both as a fetch signal and as a "do not surface
+        // onerror" gate.
+        const isIntentionalAbort = (): boolean => this._abortController?.signal.aborted === true || requestSignal?.aborted === true;
 
         try {
             // Try to open an initial SSE stream with GET to listen for server messages
             // This is optional according to the spec - server may not support it
             const headers = await this._commonHeaders();
-            headers.set('Accept', 'text/event-stream');
+            const userAccept = headers.get('accept');
+            const types = [...(userAccept?.split(',').map(s => s.trim().toLowerCase()) ?? []), 'text/event-stream'];
+            headers.set('accept', [...new Set(types)].join(', '));
 
             // Include Last-Event-ID header for resumable streams if provided
             if (resumptionToken) {
                 headers.set('last-event-id', resumptionToken);
             }
 
-            const response = await (this._fetch ?? fetch)(this._url, {
+            const transportSignal = this._abortController?.signal;
+            const signal =
+                requestSignal !== undefined && transportSignal !== undefined
+                    ? anySignal(transportSignal, requestSignal)
+                    : (requestSignal ?? transportSignal);
+            const response = await this._redirects(this._fetch ?? fetch)(this._url, {
                 ...this._requestInit,
                 method: 'GET',
                 headers,
-                signal: this._abortController?.signal
+                signal
             });
 
             if (!response.ok) {
-                await response.text?.().catch(() => {});
-
                 if (response.status === 401 && this._authProvider) {
-                    // Need to authenticate
-                    return await this._authThenStart();
+                    if (response.headers.has('www-authenticate')) {
+                        const { resourceMetadataUrl, scope } = extractWWWAuthenticateParams(response);
+                        this._resourceMetadataUrl = resourceMetadataUrl;
+                        // Preserve any union accumulated by `_stepUpAuthorize` so a 401
+                        // mid-chain does not narrow `_scope` back to the challenge value.
+                        this._scope = computeScopeUnion(this._scope, scope);
+                    }
+
+                    if (this._authProvider.onUnauthorized && !isAuthRetry) {
+                        try {
+                            await this._authProvider.onUnauthorized({
+                                response,
+                                serverUrl: this._url,
+                                fetchFn: this._fetchWithInit
+                            });
+                        } catch (error) {
+                            // Auth-seam stamp: covers the SDK's OAuth flow and
+                            // custom onUnauthorized callbacks alike.
+                            throw markAuthSeamEscape(error);
+                        }
+                        await response.text?.().catch(() => {});
+                        // Purposely _not_ awaited, so we don't call onerror twice
+                        return this._startOrAuthSse(options, true, stepUpRetries);
+                    }
+                    await response.text?.().catch(() => {});
+                    if (isAuthRetry) {
+                        throw markAuthSeamEscape(
+                            new SdkHttpError(SdkErrorCode.ClientHttpAuthentication, 'Server returned 401 after re-authentication', {
+                                status: 401,
+                                statusText: response.statusText
+                            })
+                        );
+                    }
+                    throw markAuthSeamEscape(new UnauthorizedError());
                 }
+
+                if (response.status === 403) {
+                    const { resourceMetadataUrl, scope, error, errorDescription } = extractWWWAuthenticateParams(response);
+                    if (error === 'insufficient_scope') {
+                        const text = await response.text?.().catch(() => null);
+                        const result = await this._stepUpAuthorize(
+                            { scope, resourceMetadataUrl, errorDescription, statusText: response.statusText, text },
+                            stepUpRetries
+                        );
+                        if (result !== 'AUTHORIZED') {
+                            throw markAuthSeamEscape(new UnauthorizedError());
+                        }
+                        return this._startOrAuthSse(options, isAuthRetry, stepUpRetries + 1);
+                    }
+                }
+
+                await response.text?.().catch(() => {});
 
                 // 405 indicates that the server does not offer an SSE stream at GET endpoint
                 // This is an expected case that should not trigger an error
                 if (response.status === 405) {
+                    // A 405 on the standalone-GET path is benign (the caller
+                    // never had a per-request stream). On the POST→GET resume
+                    // path it is a TERMINAL non-resumable outcome for a
+                    // per-request stream the caller is observing — fire the
+                    // stream-end callback so the caller can settle (otherwise
+                    // a resumed listen subscription dead-ends silently). The
+                    // standalone-GET callers never pass `onRequestStreamEnd`,
+                    // so this is a no-op for them.
+                    options.onRequestStreamEnd?.();
                     return;
                 }
 
-                throw new SdkError(SdkErrorCode.ClientHttpFailedToOpenStream, `Failed to open SSE stream: ${response.statusText}`, {
+                const reason = this._unfollowedRedirect(this._url, response) ?? response.statusText;
+                throw new SdkHttpError(SdkErrorCode.ClientHttpFailedToOpenStream, `Failed to open SSE stream: ${reason}`, {
                     status: response.status,
                     statusText: response.statusText
                 });
@@ -250,7 +685,9 @@ export class StreamableHTTPClientTransport implements Transport {
 
             this._handleSseStream(response.body, options, true);
         } catch (error) {
-            this.onerror?.(error as Error);
+            if (!isIntentionalAbort()) {
+                this.onerror?.(error as Error);
+            }
             throw error;
         }
     }
@@ -289,28 +726,56 @@ export class StreamableHTTPClientTransport implements Transport {
         // Check if we've exceeded maximum retry attempts
         if (attemptCount >= maxRetries) {
             this.onerror?.(new Error(`Maximum reconnection attempts (${maxRetries}) exceeded.`));
+            // The per-request stream is now definitively gone.
+            options.onRequestStreamEnd?.();
             return;
         }
 
         // Calculate next delay based on current attempt count
         const delay = this._getNextReconnectionDelay(attemptCount);
 
-        // Schedule the reconnection
-        this._reconnectionTimeout = setTimeout(() => {
-            // Use the last event ID to resume where we left off
+        const reconnect = (): void => {
+            this._cancelReconnection = undefined;
+            // Honour BOTH the transport-wide abort and the per-request abort
+            // (a listen subscription closed during the backoff delay): do not
+            // resurrect a stream the caller already tore down.
+            if (this._abortController?.signal.aborted || options.requestSignal?.aborted) return;
             this._startOrAuthSse(options).catch(error => {
+                if (this._abortController?.signal.aborted || options.requestSignal?.aborted) return;
                 this.onerror?.(new Error(`Failed to reconnect SSE stream: ${error instanceof Error ? error.message : String(error)}`));
-                // Schedule another attempt if this one failed, incrementing the attempt counter
-                this._scheduleReconnection(options, attemptCount + 1);
+                try {
+                    this._scheduleReconnection(options, attemptCount + 1);
+                } catch (scheduleError) {
+                    this.onerror?.(scheduleError instanceof Error ? scheduleError : new Error(String(scheduleError)));
+                }
             });
-        }, delay);
+        };
+
+        if (this._reconnectionScheduler) {
+            const cancel = this._reconnectionScheduler(reconnect, delay, attemptCount);
+            this._cancelReconnection = typeof cancel === 'function' ? cancel : undefined;
+        } else {
+            const handle = setTimeout(reconnect, delay);
+            this._cancelReconnection = () => clearTimeout(handle);
+        }
     }
 
     private _handleSseStream(stream: ReadableStream<Uint8Array> | null, options: StartSSEOptions, isReconnectable: boolean): void {
         if (!stream) {
+            // A null body on a per-request stream (or its GET resume) is the
+            // same terminal non-resumable outcome as a 405 — fire the
+            // stream-end callback so the caller can settle. No-op for
+            // standalone-GET callers (they never pass `onRequestStreamEnd`).
+            options.onRequestStreamEnd?.();
             return;
         }
-        const { onresumptiontoken, replayMessageId } = options;
+        const { onresumptiontoken, replayMessageId, requestSignal, onRequestStreamEnd } = options;
+        // An intentional abort — transport-wide close OR a per-request abort
+        // (McpSubscription.close() aborting its `requestSignal`) — must read as
+        // a clean shutdown: no misleading "SSE stream disconnected" onerror,
+        // and no GET+Last-Event-ID reconnect that would resurrect a stream the
+        // caller just tore down.
+        const isIntentionalAbort = (): boolean => this._abortController?.signal.aborted === true || requestSignal?.aborted === true;
 
         let lastEventId: string | undefined;
         // Track whether we've received a priming event (event with ID)
@@ -358,7 +823,8 @@ export class StreamableHTTPClientTransport implements Transport {
                     if (!event.event || event.event === 'message') {
                         try {
                             const message = JSONRPCMessageSchema.parse(JSON.parse(event.data));
-                            if (isJSONRPCResultResponse(message)) {
+                            // Handle both success AND error responses for completion detection and ID remapping
+                            if (isJSONRPCResultResponse(message) || isJSONRPCErrorResponse(message)) {
                                 // Mark that we received a response - no need to reconnect for this request
                                 receivedResponse = true;
                                 if (replayMessageId !== undefined) {
@@ -378,17 +844,29 @@ export class StreamableHTTPClientTransport implements Transport {
                 // BUT don't reconnect if we already received a response - the request is complete
                 const canResume = isReconnectable || hasPrimingEvent;
                 const needsReconnect = canResume && !receivedResponse;
-                if (needsReconnect && this._abortController && !this._abortController.signal.aborted) {
+                if (needsReconnect && this._abortController && !isIntentionalAbort()) {
                     this._scheduleReconnection(
                         {
                             resumptionToken: lastEventId,
                             onresumptiontoken,
-                            replayMessageId
+                            replayMessageId,
+                            requestSignal,
+                            onRequestStreamEnd
                         },
                         0
                     );
+                } else if (!isIntentionalAbort()) {
+                    // The per-request stream ended without reconnecting (no
+                    // priming event for a POST stream, or response already
+                    // received). Not a deliberate abort — notify the caller.
+                    onRequestStreamEnd?.();
                 }
             } catch (error) {
+                if (isIntentionalAbort()) {
+                    // The reader threw because we aborted it. Not an error; do
+                    // not surface onerror, do not reconnect.
+                    return;
+                }
                 // Handle stream errors - likely a network disconnect
                 this.onerror?.(new Error(`SSE stream disconnected: ${error}`));
 
@@ -397,20 +875,27 @@ export class StreamableHTTPClientTransport implements Transport {
                 // BUT don't reconnect if we already received a response - the request is complete
                 const canResume = isReconnectable || hasPrimingEvent;
                 const needsReconnect = canResume && !receivedResponse;
-                if (needsReconnect && this._abortController && !this._abortController.signal.aborted) {
+                if (needsReconnect && this._abortController && !isIntentionalAbort()) {
                     // Use the exponential backoff reconnection strategy
                     try {
                         this._scheduleReconnection(
                             {
                                 resumptionToken: lastEventId,
                                 onresumptiontoken,
-                                replayMessageId
+                                replayMessageId,
+                                requestSignal,
+                                onRequestStreamEnd
                             },
                             0
                         );
                     } catch (error) {
                         this.onerror?.(new Error(`Failed to reconnect: ${error instanceof Error ? error.message : String(error)}`));
+                        onRequestStreamEnd?.();
                     }
+                } else {
+                    // Non-deliberate stream error without reconnection: the
+                    // per-request stream is gone — notify the caller.
+                    onRequestStreamEnd?.();
                 }
             }
         };
@@ -429,18 +914,50 @@ export class StreamableHTTPClientTransport implements Transport {
 
     /**
      * Call this method after the user has finished authorizing via their user agent and is redirected back to the MCP client application. This will exchange the authorization code for an access token, enabling the next connection attempt to successfully auth.
+     *
+     * **Preferred:** pass the callback URL's `searchParams` directly. The SDK extracts `code`
+     * and `iss`, validates `iss` against the recorded issuer (RFC 9207) **before** reading any
+     * other parameter, and on mismatch throws an {@linkcode IssuerMismatchError} that carries
+     * none of the callback's `error`/`error_description`/`error_uri` text — those are
+     * attacker-controlled in a mix-up attack and MUST NOT be displayed. The `(code, iss?)`
+     * positional form remains supported for back-compat.
+     *
+     * The SDK does **not** validate `state`; compare it to your stored value before calling
+     * `finishAuth`.
+     *
+     * @param callbackParams - The `URLSearchParams` from the authorization callback URL
+     *   (e.g. `new URL(callbackUrl).searchParams`). `code` and `iss` are read from it.
      */
-    async finishAuth(authorizationCode: string): Promise<void> {
-        if (!this._authProvider) {
-            throw new UnauthorizedError('No auth provider');
+    async finishAuth(callbackParams: URLSearchParams): Promise<void>;
+    /**
+     * @param authorizationCode - The `code` query parameter from the authorization callback URL.
+     * @param iss - The form-urldecoded `iss` query parameter from the same callback URL, if
+     *   present. Validated per RFC 9207 against the recorded issuer before the code is redeemed.
+     *   When the authorization server advertises `authorization_response_iss_parameter_supported: true`,
+     *   omitting this causes the exchange to be **rejected** with {@linkcode IssuerMismatchError}.
+     */
+    async finishAuth(authorizationCode: string, iss?: string): Promise<void>;
+    async finishAuth(codeOrParams: string | URLSearchParams, iss?: string): Promise<void> {
+        if (!this._oauthProvider) {
+            throw new UnauthorizedError('finishAuth requires an OAuthClientProvider');
         }
 
-        const result = await auth(this._authProvider, {
+        const { authorizationCode, iss: issParam } = await resolveAuthorizationCallbackParams(
+            codeOrParams,
+            iss,
+            this._oauthProvider,
+            this._url,
+            { fetchFn: this._fetchWithInit, resourceMetadataUrl: this._resourceMetadataUrl }
+        );
+
+        const result = await auth(this._oauthProvider, {
             serverUrl: this._url,
             authorizationCode,
+            iss: issParam,
             resourceMetadataUrl: this._resourceMetadataUrl,
             scope: this._scope,
-            fetchFn: this._fetchWithInit
+            fetchFn: this._fetchWithInit,
+            skipIssuerMetadataValidation: this._skipIssuerMetadataValidation
         });
         if (result !== 'AUTHORIZED') {
             throw new UnauthorizedError('Failed to authorize');
@@ -448,129 +965,202 @@ export class StreamableHTTPClientTransport implements Transport {
     }
 
     async close(): Promise<void> {
-        if (this._reconnectionTimeout) {
-            clearTimeout(this._reconnectionTimeout);
-            this._reconnectionTimeout = undefined;
+        try {
+            this._cancelReconnection?.();
+        } finally {
+            this._cancelReconnection = undefined;
+            this._abortController?.abort();
+            this.onclose?.();
         }
-        this._abortController?.abort();
-        this.onclose?.();
     }
 
     async send(
         message: JSONRPCMessage | JSONRPCMessage[],
-        options?: { resumptionToken?: string; onresumptiontoken?: (token: string) => void }
+        options?: {
+            resumptionToken?: string;
+            onresumptiontoken?: (token: string) => void;
+            requestSignal?: AbortSignal;
+            onRequestStreamEnd?: () => void;
+            headers?: Readonly<Record<string, string>>;
+        }
+    ): Promise<void> {
+        return this._send(message, options, false);
+    }
+
+    private async _send(
+        message: JSONRPCMessage | JSONRPCMessage[],
+        options:
+            | {
+                  resumptionToken?: string;
+                  onresumptiontoken?: (token: string) => void;
+                  requestSignal?: AbortSignal;
+                  onRequestStreamEnd?: () => void;
+                  headers?: Readonly<Record<string, string>>;
+              }
+            | undefined,
+        isAuthRetry: boolean,
+        stepUpRetries = 0
     ): Promise<void> {
         try {
             const { resumptionToken, onresumptiontoken } = options || {};
 
             if (resumptionToken) {
-                // If we have a last event ID, we need to reconnect the SSE stream
-                this._startOrAuthSse({ resumptionToken, replayMessageId: isJSONRPCRequest(message) ? message.id : undefined }).catch(
-                    error => this.onerror?.(error)
-                );
+                // If we have a last event ID, we need to reconnect the SSE stream.
+                // Thread `requestSignal` through so the resumed GET honours the
+                // same per-request abort as the original POST — modern-era
+                // cancel-via-stream-close routes through `requestSignal`, and
+                // without it a resumed long-running request would not cancel.
+                this._startOrAuthSse({
+                    resumptionToken,
+                    replayMessageId: isJSONRPCRequest(message) ? message.id : undefined,
+                    requestSignal: options?.requestSignal
+                }).catch(error => this.onerror?.(error));
                 return;
             }
 
             const headers = await this._commonHeaders();
+            this._applyBodyDerivedHeaders(headers, message);
+            // A new session starts "without a session ID attached" (2025-11-25 transports §Session Management).
+            const isHandshake = Array.isArray(message) ? message.some(m => isInitializeRequest(m)) : isInitializeRequest(message);
+            if (isHandshake) {
+                headers.delete('mcp-session-id');
+            }
+            // Per-request additional headers (the Client passes SEP-2243
+            // `Mcp-Param-*` here on a 2026-07-28 connection). Reserved
+            // standard/auth header names are skipped so a caller cannot
+            // accidentally override the body-derived or connection-level
+            // headers — `Headers.set` overwrites, so the only way to keep the
+            // transport-owned values authoritative is to refuse to write over
+            // them here.
+            if (options?.headers !== undefined) {
+                for (const [name, value] of Object.entries(options.headers)) {
+                    if (RESERVED_REQUEST_HEADER_NAMES.has(name.toLowerCase())) continue;
+                    headers.set(name, value);
+                }
+            }
             headers.set('content-type', 'application/json');
-            headers.set('accept', 'application/json, text/event-stream');
+            const userAccept = headers.get('accept');
+            const types = [...(userAccept?.split(',').map(s => s.trim().toLowerCase()) ?? []), 'application/json', 'text/event-stream'];
+            headers.set('accept', [...new Set(types)].join(', '));
 
+            // Per-request abort: when the caller supplies a request-scoped
+            // signal (the `subscriptions/listen` driver), aborting it cancels
+            // this POST and its SSE response stream without closing the
+            // transport.
+            const transportSignal = this._abortController?.signal;
+            const signal =
+                options?.requestSignal !== undefined && transportSignal !== undefined
+                    ? anySignal(transportSignal, options.requestSignal)
+                    : (options?.requestSignal ?? transportSignal);
             const init = {
                 ...this._requestInit,
                 method: 'POST',
                 headers,
                 body: JSON.stringify(message),
-                signal: this._abortController?.signal
+                signal
             };
 
-            const response = await (this._fetch ?? fetch)(this._url, init);
+            const response = await this._redirects(this._fetch ?? fetch)(this._url, init);
 
-            // Handle session ID received during initialization
-            const sessionId = response.headers.get('mcp-session-id');
-            if (sessionId) {
-                this._sessionId = sessionId;
+            // The spec assigns the session id "at initialization time … on the HTTP response containing the InitializeResult"; it is ignored everywhere else.
+            // Clients include only an id "returned by the server during initialization", so a sessionless handshake clears any stale id.
+            if (isHandshake && response.ok) {
+                this._sessionId = response.headers.get('mcp-session-id') || undefined;
             }
 
             if (!response.ok) {
+                if (response.status === 401 && this._authProvider) {
+                    // Store WWW-Authenticate params for interactive finishAuth() path
+                    if (response.headers.has('www-authenticate')) {
+                        const { resourceMetadataUrl, scope } = extractWWWAuthenticateParams(response);
+                        this._resourceMetadataUrl = resourceMetadataUrl;
+                        // Preserve any union accumulated by `_stepUpAuthorize` so a 401
+                        // mid-chain does not narrow `_scope` back to the challenge value.
+                        this._scope = computeScopeUnion(this._scope, scope);
+                    }
+
+                    if (this._authProvider.onUnauthorized && !isAuthRetry) {
+                        try {
+                            await this._authProvider.onUnauthorized({
+                                response,
+                                serverUrl: this._url,
+                                fetchFn: this._fetchWithInit
+                            });
+                        } catch (error) {
+                            // Auth-seam stamp: covers the SDK's OAuth flow and
+                            // custom onUnauthorized callbacks alike.
+                            throw markAuthSeamEscape(error);
+                        }
+                        await response.text?.().catch(() => {});
+                        // Purposely _not_ awaited, so we don't call onerror twice
+                        return this._send(message, options, true, stepUpRetries);
+                    }
+                    await response.text?.().catch(() => {});
+                    if (isAuthRetry) {
+                        throw markAuthSeamEscape(
+                            new SdkHttpError(SdkErrorCode.ClientHttpAuthentication, 'Server returned 401 after re-authentication', {
+                                status: 401,
+                                statusText: response.statusText
+                            })
+                        );
+                    }
+                    throw markAuthSeamEscape(new UnauthorizedError());
+                }
+
                 const text = await response.text?.().catch(() => null);
 
-                if (response.status === 401 && this._authProvider) {
-                    // Prevent infinite recursion when server returns 401 after successful auth
-                    if (this._hasCompletedAuthFlow) {
-                        throw new SdkError(SdkErrorCode.ClientHttpAuthentication, 'Server returned 401 after successful authentication', {
-                            status: 401,
-                            text
-                        });
-                    }
-
-                    const { resourceMetadataUrl, scope } = extractWWWAuthenticateParams(response);
-                    this._resourceMetadataUrl = resourceMetadataUrl;
-                    this._scope = scope;
-
-                    const result = await auth(this._authProvider, {
-                        serverUrl: this._url,
-                        resourceMetadataUrl: this._resourceMetadataUrl,
-                        scope: this._scope,
-                        fetchFn: this._fetchWithInit
-                    });
-                    if (result !== 'AUTHORIZED') {
-                        throw new UnauthorizedError();
-                    }
-
-                    // Mark that we completed auth flow
-                    this._hasCompletedAuthFlow = true;
-                    // Purposely _not_ awaited, so we don't call onerror twice
-                    return this.send(message);
-                }
-
-                if (response.status === 403 && this._authProvider) {
-                    const { resourceMetadataUrl, scope, error } = extractWWWAuthenticateParams(response);
+                if (response.status === 403) {
+                    const { resourceMetadataUrl, scope, error, errorDescription } = extractWWWAuthenticateParams(response);
 
                     if (error === 'insufficient_scope') {
-                        const wwwAuthHeader = response.headers.get('WWW-Authenticate');
-
-                        // Check if we've already tried upscoping with this header to prevent infinite loops.
-                        if (this._lastUpscopingHeader === wwwAuthHeader) {
-                            throw new SdkError(SdkErrorCode.ClientHttpForbidden, 'Server returned 403 after trying upscoping', {
-                                status: 403,
-                                text
-                            });
-                        }
-
-                        if (scope) {
-                            this._scope = scope;
-                        }
-
-                        if (resourceMetadataUrl) {
-                            this._resourceMetadataUrl = resourceMetadataUrl;
-                        }
-
-                        // Mark that upscoping was tried.
-                        this._lastUpscopingHeader = wwwAuthHeader ?? undefined;
-                        const result = await auth(this._authProvider, {
-                            serverUrl: this._url,
-                            resourceMetadataUrl: this._resourceMetadataUrl,
-                            scope: this._scope,
-                            fetchFn: this._fetch
-                        });
-
+                        const result = await this._stepUpAuthorize(
+                            { scope, resourceMetadataUrl, errorDescription, statusText: response.statusText, text },
+                            stepUpRetries
+                        );
                         if (result !== 'AUTHORIZED') {
-                            throw new UnauthorizedError();
+                            throw markAuthSeamEscape(new UnauthorizedError());
                         }
-
-                        return this.send(message);
+                        return this._send(message, options, isAuthRetry, stepUpRetries + 1);
                     }
                 }
 
-                throw new SdkError(SdkErrorCode.ClientHttpNotImplemented, `Error POSTing to endpoint: ${text}`, {
+                // SEP-2243 (and the rest of the inbound validation ladder)
+                // emit ladder rejections as HTTP 400 carrying a JSON-RPC error
+                // response body. Surface those in-band so `Protocol._onresponse`
+                // converts them to a typed `ProtocolError` matched to the
+                // pending request id — instead of an opaque transport error.
+                // Any 400 whose body is not a well-formed JSON-RPC error
+                // response (or whose id does not match an outstanding request)
+                // still falls through to the generic `SdkHttpError`.
+                //
+                // Modern-era only: gated on the outbound message carrying a
+                // 2026-07-28 envelope claim (the same gate the body-derived
+                // `mcp-method`/`mcp-name` headers use), so a legacy-era
+                // exchange keeps surfacing 400 as `SdkHttpError` exactly as
+                // before — the changeset's "legacy-era paths are unchanged"
+                // claim stays true and existing
+                // `e instanceof SdkHttpError && e.status === 400` callers do
+                // not silently stop matching.
+                if (response.status === 400 && typeof text === 'string' && this._isModernEnvelopedRequest(message)) {
+                    try {
+                        const parsed = JSONRPCMessageSchema.parse(JSON.parse(text));
+                        const requests = (Array.isArray(message) ? message : [message]).filter(m => isJSONRPCRequest(m));
+                        if (isJSONRPCErrorResponse(parsed) && requests.some(r => r.id === parsed.id)) {
+                            this.onmessage?.(parsed);
+                            return;
+                        }
+                    } catch {
+                        // not a JSON-RPC error body — fall through to the generic SdkHttpError below.
+                    }
+                }
+
+                const reason = this._unfollowedRedirect(this._url, response) ?? text;
+                throw new SdkHttpError(SdkErrorCode.ClientHttpNotImplemented, `Error POSTing to endpoint: ${reason}`, {
                     status: response.status,
+                    statusText: response.statusText,
                     text
                 });
             }
-
-            // Reset auth loop flag on successful response
-            this._hasCompletedAuthFlow = false;
-            this._lastUpscopingHeader = undefined;
 
             // If the response is 202 Accepted, there's no body to process
             if (response.status === 202) {
@@ -589,16 +1179,25 @@ export class StreamableHTTPClientTransport implements Transport {
 
             const hasRequests = messages.some(msg => 'method' in msg && 'id' in msg && msg.id !== undefined);
 
-            // Check the response type
+            // Check the response type (parsed media type — see mediaTypeEssence)
             const contentType = response.headers.get('content-type');
+            const responseMediaType = mediaTypeEssence(contentType);
 
             if (hasRequests) {
-                if (contentType?.includes('text/event-stream')) {
+                if (responseMediaType === 'text/event-stream') {
                     // Handle SSE stream responses for requests
                     // We use the same handler as standalone streams, which now supports
                     // reconnection with the last event ID
-                    this._handleSseStream(response.body, { onresumptiontoken }, false);
-                } else if (contentType?.includes('application/json')) {
+                    this._handleSseStream(
+                        response.body,
+                        {
+                            onresumptiontoken,
+                            requestSignal: options?.requestSignal,
+                            onRequestStreamEnd: options?.onRequestStreamEnd
+                        },
+                        false
+                    );
+                } else if (responseMediaType === 'application/json') {
                     // For non-streaming servers, we might get direct JSON responses
                     const data = await response.json();
                     const responseMessages = Array.isArray(data)
@@ -619,7 +1218,15 @@ export class StreamableHTTPClientTransport implements Transport {
                 await response.text?.().catch(() => {});
             }
         } catch (error) {
-            this.onerror?.(error as Error);
+            // Intentional per-request abort BEFORE response headers (the
+            // `subscriptions/listen` driver aborting its `requestSignal`):
+            // fetch rejects with AbortError. Same guard as
+            // `_handleSseStream`'s `isIntentionalAbort` — do not surface a
+            // misleading onerror; still rethrow so `listen()`'s send-catch
+            // settles the per-subscription state machine.
+            if (options?.requestSignal?.aborted !== true) {
+                this.onerror?.(error as Error);
+            }
             throw error;
         }
     }
@@ -654,16 +1261,20 @@ export class StreamableHTTPClientTransport implements Transport {
                 signal: this._abortController?.signal
             };
 
-            const response = await (this._fetch ?? fetch)(this._url, init);
+            const response = await this._redirects(this._fetch ?? fetch)(this._url, init);
             await response.text?.().catch(() => {});
 
             // We specifically handle 405 as a valid response according to the spec,
             // meaning the server does not support explicit session termination
             if (!response.ok && response.status !== 405) {
-                throw new SdkError(SdkErrorCode.ClientHttpFailedToTerminateSession, `Failed to terminate session: ${response.statusText}`, {
-                    status: response.status,
-                    statusText: response.statusText
-                });
+                throw new SdkHttpError(
+                    SdkErrorCode.ClientHttpFailedToTerminateSession,
+                    `Failed to terminate session: ${this._unfollowedRedirect(this._url, response) ?? response.statusText}`,
+                    {
+                        status: response.status,
+                        statusText: response.statusText
+                    }
+                );
             }
 
             this._sessionId = undefined;

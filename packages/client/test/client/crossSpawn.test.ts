@@ -1,10 +1,10 @@
 import type { ChildProcess } from 'node:child_process';
 
-import type { JSONRPCMessage } from '@modelcontextprotocol/core';
+import type { JSONRPCMessage } from '@modelcontextprotocol/core-internal';
 import spawn from 'cross-spawn';
 import type { Mock, MockedFunction } from 'vitest';
 
-import { getDefaultEnvironment, StdioClientTransport } from '../../src/client/stdio.js';
+import { getDefaultEnvironment, StdioClientTransport } from '../../src/client/stdio';
 
 // mock cross-spawn
 vi.mock('cross-spawn');
@@ -151,5 +151,55 @@ describe('StdioClientTransport using cross-spawn', () => {
 
         // verify message is sent correctly
         expect(mockProcess.stdin.write).toHaveBeenCalled();
+    });
+
+    describe('windowsHide', () => {
+        const originalPlatform = process.platform;
+
+        afterEach(() => {
+            Object.defineProperty(process, 'platform', {
+                value: originalPlatform
+            });
+        });
+
+        test('should set windowsHide to true on Windows', async () => {
+            Object.defineProperty(process, 'platform', {
+                value: 'win32'
+            });
+
+            const transport = new StdioClientTransport({
+                command: 'test-command'
+            });
+
+            await transport.start();
+
+            expect(mockSpawn).toHaveBeenCalledWith(
+                'test-command',
+                [],
+                expect.objectContaining({
+                    windowsHide: true
+                })
+            );
+        });
+
+        test('should set windowsHide to false on non-Windows', async () => {
+            Object.defineProperty(process, 'platform', {
+                value: 'linux'
+            });
+
+            const transport = new StdioClientTransport({
+                command: 'test-command'
+            });
+
+            await transport.start();
+
+            expect(mockSpawn).toHaveBeenCalledWith(
+                'test-command',
+                [],
+                expect.objectContaining({
+                    windowsHide: false
+                })
+            );
+        });
     });
 });

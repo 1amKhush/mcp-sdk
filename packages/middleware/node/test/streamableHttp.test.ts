@@ -11,14 +11,14 @@ import type {
     JSONRPCMessage,
     JSONRPCResultResponse,
     RequestId
-} from '@modelcontextprotocol/core';
+} from '@modelcontextprotocol/core-internal';
 import type { EventId, EventStore, StreamId } from '@modelcontextprotocol/server';
 import { McpServer } from '@modelcontextprotocol/server';
 import { listenOnRandomPort } from '@modelcontextprotocol/test-helpers';
 import * as z from 'zod/v4';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { NodeStreamableHTTPServerTransport } from '../src/streamableHttp.js';
+import { NodeStreamableHTTPServerTransport } from '../src/streamableHttp';
 
 async function getFreePort() {
     return new Promise(res => {
@@ -42,8 +42,8 @@ interface TestServerConfig {
     enableJsonResponse?: boolean;
     customRequestHandler?: (req: IncomingMessage, res: ServerResponse, parsedBody?: unknown) => Promise<void>;
     eventStore?: EventStore;
-    onsessioninitialized?: (sessionId: string) => void | Promise<void>;
-    onsessionclosed?: (sessionId: string) => void | Promise<void>;
+    onsessioninitialized?: ((sessionId: string) => void | Promise<void>) | undefined;
+    onsessionclosed?: ((sessionId: string) => void | Promise<void>) | undefined;
     retryInterval?: number;
 }
 
@@ -150,15 +150,11 @@ function expectErrorResponse(
 }
 describe('Zod v4', () => {
     /**
-     * Helper to create and start test HTTP server with MCP setup
+     * Helper to connect a new MCP server to a new transport
      */
-    async function createTestServer(config?: TestServerConfig): Promise<{
-        server: Server;
-        transport: NodeStreamableHTTPServerTransport;
-        mcpServer: McpServer;
-        baseUrl: URL;
-    }> {
-        config ??= { sessionIdGenerator: () => randomUUID() };
+    async function createTestPair(
+        config: TestServerConfig
+    ): Promise<{ transport: NodeStreamableHTTPServerTransport; mcpServer: McpServer }> {
         const mcpServer = new McpServer({ name: 'test-server', version: '1.0.0' }, { capabilities: { logging: {} } });
 
         mcpServer.registerTool(
@@ -182,6 +178,21 @@ describe('Zod v4', () => {
         });
 
         await mcpServer.connect(transport);
+
+        return { transport, mcpServer };
+    }
+
+    /**
+     * Helper to create and start test HTTP server with MCP setup
+     */
+    async function createTestServer(config?: TestServerConfig): Promise<{
+        server: Server;
+        transport: NodeStreamableHTTPServerTransport;
+        mcpServer: McpServer;
+        baseUrl: URL;
+    }> {
+        config ??= { sessionIdGenerator: () => randomUUID() };
+        const { transport, mcpServer } = await createTestPair(config);
 
         const server = createServer(async (req, res) => {
             try {
@@ -396,7 +407,7 @@ describe('Zod v4', () => {
         /***
          * Test: Tool With Request Info
          */
-        it('should pass request info to tool callback', async () => {
+        it('should expose the full Request object to tool handlers', async () => {
             sessionId = await initializeServer();
 
             mcpServer.registerTool(
@@ -406,10 +417,11 @@ describe('Zod v4', () => {
                     inputSchema: z.object({ name: z.string().describe('Name to greet') })
                 },
                 async ({ name }, ctx): Promise<CallToolResult> => {
-                    // Convert Headers object to plain object for JSON serialization
-                    // Headers is a Web API class that doesn't serialize with JSON.stringify
+                    const req = ctx.http?.req;
                     const serializedRequestInfo = {
-                        headers: Object.fromEntries(ctx.http?.req?.headers ?? new Headers())
+                        headers: Object.fromEntries(req?.headers ?? new Headers()),
+                        url: req?.url,
+                        method: req?.method
                     };
                     return {
                         content: [
@@ -464,8 +476,56 @@ describe('Zod v4', () => {
                     'user-agent': expect.any(String),
                     'accept-encoding': expect.any(String),
                     'content-length': expect.any(String)
-                }
+                },
+                url: expect.stringContaining(baseUrl.pathname),
+                method: 'POST'
             });
+        });
+
+        it('should expose query parameters via the Request object', async () => {
+            sessionId = await initializeServer();
+
+            mcpServer.registerTool(
+                'test-query-params',
+                {
+                    description: 'A tool that reads query params',
+                    inputSchema: z.object({})
+                },
+                async (_args, ctx): Promise<CallToolResult> => {
+                    const req = ctx.http?.req;
+                    const url = new URL(req!.url);
+                    const params = Object.fromEntries(url.searchParams);
+                    return {
+                        content: [{ type: 'text', text: JSON.stringify(params) }]
+                    };
+                }
+            );
+
+            const toolCallMessage: JSONRPCMessage = {
+                jsonrpc: '2.0',
+                method: 'tools/call',
+                params: {
+                    name: 'test-query-params',
+                    arguments: {}
+                },
+                id: 'call-2'
+            };
+
+            // Send to a URL with query parameters
+            const urlWithParams = new URL(baseUrl.toString());
+            urlWithParams.searchParams.set('foo', 'bar');
+            urlWithParams.searchParams.set('debug', 'true');
+
+            const response = await sendPostRequest(urlWithParams, toolCallMessage, sessionId);
+            expect(response.status).toBe(200);
+
+            const text = await readSSEEvent(response);
+            const dataLine = text.split('\n').find(line => line.startsWith('data:'));
+            expect(dataLine).toBeDefined();
+
+            const eventData = JSON.parse(dataLine!.slice(5));
+            const queryParams = JSON.parse(eventData.result.content[0].text);
+            expect(queryParams).toEqual({ foo: 'bar', debug: 'true' });
         });
 
         it('should reject requests without a valid session ID', async () => {
@@ -1554,7 +1614,15 @@ describe('Zod v4', () => {
         let baseUrl: URL;
 
         beforeEach(async () => {
-            const result = await createTestServer({ sessionIdGenerator: undefined });
+            const result = await createTestServer({
+                sessionIdGenerator: undefined,
+                // A stateless transport serves one request: connect a new pair for each.
+                customRequestHandler: async (req, res) => {
+                    const pair = await createTestPair({ sessionIdGenerator: undefined });
+                    res.on('close', () => void pair.transport.close());
+                    await pair.transport.handleRequest(req, res);
+                }
+            });
             server = result.server;
             transport = result.transport;
             baseUrl = result.baseUrl;
@@ -1606,9 +1674,8 @@ describe('Zod v4', () => {
             expect(response2.status).toBe(200);
         });
 
-        it('should reject second SSE stream even in stateless mode', async () => {
-            // Despite no session ID requirement, the transport still only allows
-            // one standalone SSE stream at a time
+        it('should open an SSE stream per request in stateless mode', async () => {
+            // Each request has its own transport, so the one-stream limit of a transport is never reached
 
             // Initialize the server first
             await sendPostRequest(baseUrl, TEST_MESSAGES.initialize);
@@ -1623,7 +1690,7 @@ describe('Zod v4', () => {
             });
             expect(stream1.status).toBe(200);
 
-            // Open second SSE stream - should still be rejected, stateless mode still only allows one
+            // Open second SSE stream - served by its own transport
             const stream2 = await fetch(baseUrl, {
                 method: 'GET',
                 headers: {
@@ -1631,7 +1698,17 @@ describe('Zod v4', () => {
                     'mcp-protocol-version': '2025-11-25'
                 }
             });
-            expect(stream2.status).toBe(409); // Conflict - only one stream allowed
+            expect(stream2.status).toBe(200);
+        });
+
+        it('should answer 500 to a second request on the same transport', async () => {
+            const shared = await createTestServer({ sessionIdGenerator: undefined });
+            try {
+                expect((await sendPostRequest(shared.baseUrl, TEST_MESSAGES.initialize)).status).toBe(200);
+                expect((await sendPostRequest(shared.baseUrl, TEST_MESSAGES.toolsList)).status).toBe(500);
+            } finally {
+                await stopTestServer(shared);
+            }
         });
     });
 
@@ -2893,7 +2970,7 @@ describe('Zod v4', () => {
         describe('Combined validations', () => {
             it('should validate both host and origin when both are configured', async () => {
                 const result = await createTestServerWithDnsProtection({
-                    sessionIdGenerator: undefined,
+                    sessionIdGenerator: () => randomUUID(),
                     allowedHosts: ['localhost'],
                     allowedOrigins: ['http://localhost:3001'],
                     enableDnsRebindingProtection: true

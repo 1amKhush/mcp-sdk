@@ -51,7 +51,7 @@ By the time you open a PR, the "what" and "why" should already be settled in an 
 
 This repository has two main branches:
 
-- **`main`** – v2 of the SDK (currently in development). This is a monorepo with split packages.
+- **`main`** – v2 of the SDK (the stable release line). This is a monorepo with split packages.
 - **`v1.x`** – stable v1 release. Bug fixes and patches for v1 should target this branch.
 
 **Which branch should I use as a base?**
@@ -110,18 +110,31 @@ Then:
 4. Run `pnpm test:all` to verify all tests pass
 5. Submit a pull request
 
+### Good to know
+
+Details about this repository that neither the code nor the tools will tell you.
+
+- **Spec** — The full spec text is at `https://modelcontextprotocol.io/llms-full.txt`, and the schema for a protocol revision is `schema/<revision>/schema.ts` in `modelcontextprotocol/modelcontextprotocol`.
+- **Tests** — Tests live under each package's `test/` directory; a test file next to its source never runs.
+- **Adapters** — The packages under `packages/middleware/` are thin adapters, versioned separately from client and server, so a user can run a new server with an older adapter.
+- **Package roots** — A package's root entry stays runtime-neutral so browser and Workers bundlers can use it; Node-only code lives at a subpath export such as `./stdio`.
+- **Migration guide** — `docs/migration/upgrade-to-v2.md` covers the upgrade from v1 only; mechanical renames go in `packages/codemod/src/migrations/v1-to-v2/mappings/`.
+
 ### Running Examples
 
-See [`examples/server/README.md`](examples/server/README.md) and [`examples/client/README.md`](examples/client/README.md) for a full list of runnable examples.
+See [`examples/README.md`](examples/README.md) for the full list of runnable examples — one self-verifying client/server pair per directory.
 
 Quick start:
 
 ```bash
-# Run a server example
-pnpm --filter @modelcontextprotocol/examples-server exec tsx src/simpleStreamableHttp.ts
+# Run any story's server
+pnpm --filter @mcp-examples/tools server -- --http --port 3000
 
-# Run a client example (in another terminal)
-pnpm --filter @modelcontextprotocol/examples-client exec tsx src/simpleStreamableHttp.ts
+# Run its client (in another terminal)
+pnpm --filter @mcp-examples/tools client -- --http http://127.0.0.1:3000/
+
+# Run every story over every transport × era leg
+pnpm run:examples
 ```
 
 ## Releasing v1.x Patches
