@@ -1,0 +1,1036 @@
+--- a/src/__mocks__/mock-mcp-server-nostr-transport.ts
++++ b/src/__mocks__/mock-mcp-server-nostr-transport.ts
+@@ -16,7 +16,7 @@
+   {
+     title: 'Addition Tool',
+     description: 'Add two numbers',
+-    inputSchema: { a: z.number(), b: z.number() },
++    inputSchema: z.object({ a: z.number(), b: z.number() }),
+   },
+   async ({ a, b }) => ({
+     content: [{ type: 'text', text: String(a + b) }],
+--- a/src/__mocks__/mock-mcp-server.ts
++++ b/src/__mocks__/mock-mcp-server.ts
+@@ -14,7 +14,7 @@
+   {
+     title: 'Addition Tool',
+     description: 'Add two numbers',
+-    inputSchema: { a: z.number(), b: z.number() },
++    inputSchema: z.object({ a: z.number(), b: z.number() }),
+   },
+   async ({ a, b }) => ({
+     content: [{ type: 'text', text: String(a + b) }],
+--- a/src/__mocks__/mock-paid-server.ts
++++ b/src/__mocks__/mock-paid-server.ts
+@@ -24,7 +24,7 @@
+   {
+     title: 'Echo Tool',
+     description: 'Echoes back the provided message',
+-    inputSchema: { message: z.string() },
++    inputSchema: z.object({ message: z.string() }),
+   },
+   async ({ message }: { message: string }) => ({
+     content: [{ type: 'text', text: message }],
+--- a/src/gateway/gateway-dispatch.test.ts
++++ b/src/gateway/gateway-dispatch.test.ts
+@@ -1,3 +1,4 @@
++import { z } from 'zod';
+ import {
+   afterAll,
+   afterEach,
+@@ -62,7 +63,7 @@
+       {
+         title: 'Ping',
+         description: 'Counts how many times it runs',
+-        inputSchema: {},
++        inputSchema: z.object({}),
+       },
+       async () => {
+         calls++;
+--- a/src/gateway/gateway-payments.test.ts
++++ b/src/gateway/gateway-payments.test.ts
+@@ -64,7 +64,7 @@
+       {
+         title: 'Echo',
+         description: 'Echoes the message',
+-        inputSchema: { message: z.string() },
++        inputSchema: z.object({ message: z.string() }),
+       },
+       async ({ message }: { message: string }) => ({
+         content: [{ type: 'text', text: message }],
+--- a/src/payments/nwc-paid-capability-e2e.test.ts
++++ b/src/payments/nwc-paid-capability-e2e.test.ts
+@@ -122,7 +122,7 @@
+         {
+           title: 'Addition Tool',
+           description: 'Add two numbers',
+-          inputSchema: { a: z.number(), b: z.number() },
++          inputSchema: z.object({ a: z.number(), b: z.number() }),
+         },
+         async ({ a, b }: { a: number; b: number }) => ({
+           content: [{ type: 'text', text: String(a + b) }],
+@@ -219,7 +219,7 @@
+         {
+           title: 'Addition Tool',
+           description: 'Add two numbers',
+-          inputSchema: { a: z.number(), b: z.number() },
++          inputSchema: z.object({ a: z.number(), b: z.number() }),
+         },
+         async ({ a, b }: { a: number; b: number }) => ({
+           content: [{ type: 'text', text: String(a + b) }],
+--- a/src/payments/server-transport-payments.shutdown.test.ts
++++ b/src/payments/server-transport-payments.shutdown.test.ts
+@@ -97,7 +97,7 @@
+   });
+   mcpServer.registerTool(
+     'add',
+-    { inputSchema: { a: z.number(), b: z.number() } },
++    { inputSchema: z.object({ a: z.number(), b: z.number() }) },
+     async ({ a, b }) => {
+       toolCalls.push({ a, b });
+       return { content: [{ type: 'text', text: String(a + b) }] };
+--- a/src/proxy/proxy-payments.test.ts
++++ b/src/proxy/proxy-payments.test.ts
+@@ -66,7 +66,7 @@
+       {
+         title: 'Echo',
+         description: 'Echoes the message',
+-        inputSchema: { message: z.string() },
++        inputSchema: z.object({ message: z.string() }),
+       },
+       async ({ message }: { message: string }) => ({
+         content: [{ type: 'text', text: message }],
+--- a/src/transport/call-tool-stream.e2e.test.ts
++++ b/src/transport/call-tool-stream.e2e.test.ts
+@@ -18,9 +18,9 @@
+ import { NostrServerTransport } from './nostr-server-transport.js';
+ 
+ function getOpenStreamWriter(extra: {
+-  _meta?: Record<string, unknown>;
++  mcpReq: { _meta?: Record<string, unknown> };
+ }): OpenStreamWriter {
+-  const stream = (extra._meta as { stream?: OpenStreamWriter } | undefined)
++  const stream = (extra.mcpReq._meta as { stream?: OpenStreamWriter } | undefined)
+     ?.stream;
+ 
+   expect(stream).toBeDefined();
+@@ -179,9 +179,9 @@
+       {
+         title: 'Subscribe To Events',
+         description: 'Streams mock event notifications to the caller.',
+-        inputSchema: {
++        inputSchema: z.object({
+           topic: z.string(),
+-        },
++        }),
+       },
+       async ({ topic }, extra) => {
+         const stream = getOpenStreamWriter(extra);
+@@ -247,9 +247,9 @@
+       {
+         title: 'Delayed Close',
+         description: 'Waits before closing the stream.',
+-        inputSchema: {
++        inputSchema: z.object({
+           topic: z.string(),
+-        },
++        }),
+       },
+       async ({ topic }, extra) => {
+         const stream = getOpenStreamWriter(extra);
+@@ -309,9 +309,9 @@
+       {
+         title: 'Aborting Stream',
+         description: 'Aborts after emitting one chunk.',
+-        inputSchema: {
++        inputSchema: z.object({
+           topic: z.string(),
+-        },
++        }),
+       },
+       async ({ topic }, extra) => {
+         const stream = getOpenStreamWriter(extra);
+@@ -362,9 +362,9 @@
+       {
+         title: 'Subscribe To Events',
+         description: 'Streams topic-specific events to the caller.',
+-        inputSchema: {
++        inputSchema: z.object({
+           topic: z.string(),
+-        },
++        }),
+       },
+       async ({ topic }, extra) => {
+         const stream = getOpenStreamWriter(extra);
+@@ -442,9 +442,9 @@
+       {
+         title: 'Subscribe To Events',
+         description: 'Streams mock event notifications to the caller.',
+-        inputSchema: {
++        inputSchema: z.object({
+           topic: z.string(),
+-        },
++        }),
+       },
+       async ({ topic }, extra) => {
+         const stream = getOpenStreamWriter(extra);
+@@ -518,9 +518,9 @@
+       {
+         title: 'Keepalive Stream',
+         description: 'Waits long enough to require keepalive before resuming.',
+-        inputSchema: {
++        inputSchema: z.object({
+           topic: z.string(),
+-        },
++        }),
+       },
+       async ({ topic }, extra) => {
+         const stream = getOpenStreamWriter(extra);
+@@ -614,9 +614,9 @@
+         title: 'Probe Timeout Stream',
+         description:
+           'Stays open until the receiver aborts after probe timeout.',
+-        inputSchema: {
++        inputSchema: z.object({
+           topic: z.string(),
+-        },
++        }),
+       },
+       async ({ topic }, extra) => {
+         const stream = getOpenStreamWriter(extra);
+@@ -719,9 +719,9 @@
+         title: 'Interleaved Control Stream',
+         description:
+           'Continues streaming after client-originated keepalive control frames.',
+-        inputSchema: {
++        inputSchema: z.object({
+           topic: z.string(),
+-        },
++        }),
+       },
+       async ({ topic }, extra) => {
+         const stream = getOpenStreamWriter(extra);
+@@ -811,9 +811,9 @@
+       {
+         title: 'Client Abortable Stream',
+         description: 'Keeps the stream open until the client aborts it.',
+-        inputSchema: {
++        inputSchema: z.object({
+           topic: z.string(),
+-        },
++        }),
+       },
+       async ({ topic }, extra) => {
+         const stream = getOpenStreamWriter(extra);
+@@ -918,9 +918,9 @@
+       {
+         title: 'Mixed Terminal Streams',
+         description: 'Aborts one stream and closes the other.',
+-        inputSchema: {
++        inputSchema: z.object({
+           topic: z.string(),
+-        },
++        }),
+       },
+       async ({ topic }, extra) => {
+         const stream = getOpenStreamWriter(extra);
+@@ -999,9 +999,9 @@
+       {
+         title: 'Bootstrap Only',
+         description: 'Stays pending while bootstrap frames are negotiated.',
+-        inputSchema: {
++        inputSchema: z.object({
+           topic: z.string(),
+-        },
++        }),
+       },
+       async ({ topic }, extra) => {
+         void getOpenStreamWriter(extra);
+@@ -1096,7 +1096,7 @@
+       {
+         title: 'Client Started Echo',
+         description: 'Stays pending while the client streams.',
+-        inputSchema: { topic: z.string() },
++        inputSchema: z.object({ topic: z.string() }),
+       },
+       async () => {
+         await new Promise<void>(() => undefined);
+@@ -1110,7 +1110,6 @@
+     void client
+       .callTool(
+         { name: 'clientStartedEcho', arguments: { topic: 'orders' } },
+-        undefined,
+         { onprogress: () => undefined, resetTimeoutOnProgress: false },
+       )
+       .catch(() => undefined);
+@@ -1200,11 +1199,11 @@
+       {
+         title: 'Ingest Stream',
+         description: 'Consumes streamed input.',
+-        inputSchema: { topic: z.string() },
++        inputSchema: z.object({ topic: z.string() }),
+       },
+       async (_args, extra) => {
+         const inputStream = (
+-          extra._meta as {
++          extra.mcpReq._meta as {
+             inputStream?: AsyncIterable<{ value: string; chunkIndex: number }>;
+           } | undefined
+         )?.inputStream;
+@@ -1223,7 +1222,6 @@
+ 
+     const pending = client.callTool(
+       { name: 'ingestStream', arguments: { topic: 'orders' } },
+-      undefined,
+       { onprogress: () => undefined, resetTimeoutOnProgress: false },
+     );
+     void pending.catch(() => undefined);
+@@ -1293,11 +1291,11 @@
+       {
+         title: 'Ingest Stream',
+         description: 'Consumes streamed input.',
+-        inputSchema: { topic: z.string() },
++        inputSchema: z.object({ topic: z.string() }),
+       },
+       async (_args, extra) => {
+         const inputStream = (
+-          extra._meta as {
++          extra.mcpReq._meta as {
+             inputStream?: AsyncIterable<{ value: string; chunkIndex: number }>;
+           } | undefined
+         )?.inputStream;
+@@ -1315,7 +1313,6 @@
+ 
+     const pending = client.callTool(
+       { name: 'ingestStream', arguments: { topic: 'orders' } },
+-      undefined,
+       { onprogress: () => undefined, resetTimeoutOnProgress: false },
+     );
+     void pending.catch(() => undefined);
+@@ -1382,11 +1379,11 @@
+       {
+         title: 'Ingest Stream',
+         description: 'Consumes streamed input.',
+-        inputSchema: { topic: z.string() },
++        inputSchema: z.object({ topic: z.string() }),
+       },
+       async (_args, extra) => {
+         const inputStream = (
+-          extra._meta as {
++          extra.mcpReq._meta as {
+             inputStream?: AsyncIterable<{ value: string; chunkIndex: number }>;
+           } | undefined
+         )?.inputStream;
+@@ -1404,7 +1401,6 @@
+ 
+     const pending = client.callTool(
+       { name: 'ingestStream', arguments: { topic: 'orders' } },
+-      undefined,
+       { onprogress: () => undefined, resetTimeoutOnProgress: false },
+     );
+     void pending.catch(() => undefined);
+@@ -1486,11 +1482,11 @@
+       {
+         title: 'Ingest Stream',
+         description: 'Consumes streamed input.',
+-        inputSchema: { topic: z.string() },
++        inputSchema: z.object({ topic: z.string() }),
+       },
+       async (_args, extra) => {
+         const inputStream = (
+-          extra._meta as {
++          extra.mcpReq._meta as {
+             inputStream?: AsyncIterable<{ value: string; chunkIndex: number }>;
+           } | undefined
+         )?.inputStream;
+@@ -1517,7 +1513,6 @@
+ 
+     const pending = client.callTool(
+       { name: 'ingestStream', arguments: { topic: 'orders' } },
+-      undefined,
+       { onprogress: () => undefined, resetTimeoutOnProgress: false },
+     );
+ 
+@@ -1559,7 +1554,7 @@
+       {
+         title: 'Bootstrap Abort Sink',
+         description: 'Stays pending.',
+-        inputSchema: { topic: z.string() },
++        inputSchema: z.object({ topic: z.string() }),
+       },
+       async () => {
+         await new Promise<void>(() => undefined);
+@@ -1571,7 +1566,6 @@
+ 
+     const pending = client.callTool(
+       { name: 'bootstrapAbortSink', arguments: { topic: 'orders' } },
+-      undefined,
+       { onprogress: () => undefined, resetTimeoutOnProgress: false },
+     );
+     void pending.catch(() => undefined);
+@@ -1621,7 +1615,7 @@
+       {
+         title: 'Bootstrap Hang',
+         description: 'Stays pending.',
+-        inputSchema: { topic: z.string() },
++        inputSchema: z.object({ topic: z.string() }),
+       },
+       async () => {
+         await new Promise<void>(() => undefined);
+@@ -1686,9 +1680,9 @@
+       {
+         title: 'Deferred Response Stream',
+         description: 'Keeps the stream open until explicitly released.',
+-        inputSchema: {
++        inputSchema: z.object({
+           topic: z.string(),
+-        },
++        }),
+       },
+       async ({ topic }, extra) => {
+         const stream = getOpenStreamWriter(extra);
+--- a/src/transport/call-tool-stream.test.ts
++++ b/src/transport/call-tool-stream.test.ts
+@@ -24,7 +24,7 @@
+       version: '1.0.0',
+     });
+ 
+-    client.callTool = async (params, _schema, options) => {
++    client.callTool = async (params, options) => {
+       capturedParams = params;
+       capturedOptions = options as typeof capturedOptions;
+       return {
+--- a/src/transport/call-tool-stream.ts
++++ b/src/transport/call-tool-stream.ts
+@@ -38,7 +38,6 @@
+       name,
+       arguments: toolArguments,
+     } satisfies CallToolRequest['params'],
+-    undefined,
+     {
+       onprogress: onprogress ?? (() => undefined),
+       resetTimeoutOnProgress: true,
+--- a/src/transport/nostr-client-transport.test.ts
++++ b/src/transport/nostr-client-transport.test.ts
+@@ -104,7 +104,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }) => ({
+         content: [{ type: 'text', text: String(a + b) }],
+@@ -334,7 +334,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }) => ({
+         content: [{ type: 'text', text: String(a + b) }],
+@@ -450,7 +450,7 @@
+         {
+           title: 'Addition Tool',
+           description: 'Add two numbers',
+-          inputSchema: { a: z.number(), b: z.number() },
++          inputSchema: z.object({ a: z.number(), b: z.number() }),
+         },
+         async ({ a, b }) => ({
+           content: [{ type: 'text', text: String(a + b) }],
+@@ -724,7 +724,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }) => ({
+         content: [{ type: 'text', text: String(a + b) }],
+@@ -799,7 +799,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }) => ({
+         content: [{ type: 'text', text: String(a + b) }],
+@@ -887,7 +887,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }) => ({
+         content: [{ type: 'text', text: String(a + b) }],
+@@ -981,7 +981,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }) => ({
+         content: [{ type: 'text', text: String(a + b) }],
+@@ -1072,7 +1072,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }) => ({
+         content: [{ type: 'text', text: String(a + b) }],
+@@ -1104,7 +1104,6 @@
+     await client.connect(clientTransport);
+     await client.callTool(
+       { name: 'add', arguments: { a: 1, b: 2 } },
+-      undefined,
+       { onprogress: () => undefined, resetTimeoutOnProgress: true },
+     );
+ 
+--- a/src/transport/nostr-server-transport.auth.test.ts
++++ b/src/transport/nostr-server-transport.auth.test.ts
+@@ -1,3 +1,4 @@
++import { z } from 'zod';
+ import { afterAll, describe, test, expect } from 'bun:test';
+ import { sleep } from 'bun';
+ import { Client } from '@contextvm/mcp-sdk/client';
+@@ -58,7 +59,7 @@
+       {
+         title: 'Dummy Tool',
+         description: 'A dummy tool',
+-        inputSchema: {},
++        inputSchema: z.object({}),
+       },
+       async () => ({ content: [{ type: 'text', text: 'dummy' }] }),
+     );
+@@ -274,7 +275,7 @@
+       {
+         title: 'Dummy Tool',
+         description: 'A dummy tool',
+-        inputSchema: {},
++        inputSchema: z.object({}),
+       },
+       async () => ({ content: [{ type: 'text', text: 'dummy' }] }),
+     );
+@@ -323,7 +324,7 @@
+       {
+         title: 'Dummy Tool',
+         description: 'A dummy tool',
+-        inputSchema: {},
++        inputSchema: z.object({}),
+       },
+       async () => ({ content: [{ type: 'text', text: 'dummy' }] }),
+     );
+--- a/src/transport/nostr-server-transport.resource-updates.test.ts
++++ b/src/transport/nostr-server-transport.resource-updates.test.ts
+@@ -2,9 +2,6 @@
+ import { Client } from '@contextvm/mcp-sdk/client';
+ import { McpServer } from '@contextvm/mcp-sdk/server/mcp';
+ import {
+-  ResourceUpdatedNotificationSchema,
+-  SubscribeRequestSchema,
+-  UnsubscribeRequestSchema,
+ } from '@contextvm/mcp-sdk/types.js';
+ import { generateSecretKey, getPublicKey } from 'nostr-tools/pure';
+ import { bytesToHex, hexToBytes } from 'nostr-tools/utils';
+@@ -26,8 +23,8 @@
+     { name: 'Resource update server', version: '1.0.0' },
+     { capabilities: { resources: { subscribe: true } } },
+   );
+-  server.server.setRequestHandler(SubscribeRequestSchema, async () => ({}));
+-  server.server.setRequestHandler(UnsubscribeRequestSchema, async () => ({}));
++  server.server.setRequestHandler("resources/subscribe", async () => ({}));
++  server.server.setRequestHandler("resources/unsubscribe", async () => ({}));
+ 
+   const serverTransport = new NostrServerTransport({
+     signer: new PrivateKeySigner(serverPrivateKey),
+@@ -41,13 +38,13 @@
+   const betaUpdates: string[] = [];
+ 
+   alphaClient.setNotificationHandler(
+-    ResourceUpdatedNotificationSchema,
++    "notifications/resources/updated",
+     (notification) => {
+       alphaUpdates.push(notification.params.uri);
+     },
+   );
+   betaClient.setNotificationHandler(
+-    ResourceUpdatedNotificationSchema,
++    "notifications/resources/updated",
+     (notification) => {
+       betaUpdates.push(notification.params.uri);
+     },
+--- a/src/transport/nostr-server-transport.test.ts
++++ b/src/transport/nostr-server-transport.test.ts
+@@ -180,7 +180,7 @@
+         {
+           title: 'Addition Tool',
+           description: 'Add two numbers',
+-          inputSchema: { a: z.number(), b: z.number() },
++          inputSchema: z.object({ a: z.number(), b: z.number() }),
+         },
+         async ({ a, b }) => ({
+           content: [{ type: 'text', text: String(a + b) }],
+@@ -679,7 +679,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }) => ({
+         content: [{ type: 'text', text: String(a + b) }],
+@@ -691,7 +691,7 @@
+       {
+         title: 'Dummy Tool',
+         description: 'Dummy description',
+-        inputSchema: {},
++        inputSchema: z.object({}),
+       },
+       async () => ({
+         content: [{ type: 'text', text: 'Dummy response' }],
+@@ -1054,7 +1054,7 @@
+         {
+           title: 'Inspect Request Event',
+           description: 'Reads the inbound Nostr request event from context',
+-          inputSchema: {},
++          inputSchema: z.object({}),
+         },
+         async () => {
+           return {
+@@ -1149,10 +1149,10 @@
+           title: 'Who Am I',
+           description:
+             'Returns the public key of the client that invoked this tool.',
+-          inputSchema: {},
++          inputSchema: z.object({}),
+         },
+         async (_args, extra) => {
+-          const requestEventId = extra._meta?.requestEventId;
++          const requestEventId = extra.mcpReq._meta?.requestEventId;
+           if (requestEventId) {
+             const requestEvent = transport.getNostrRequestEvent(
+               String(requestEventId),
+@@ -1221,7 +1221,7 @@
+         {
+           title: 'Inspect Request Event',
+           description: 'Reads the inbound Nostr request event from context',
+-          inputSchema: {},
++          inputSchema: z.object({}),
+         },
+         async () => {
+           return {
+@@ -1945,10 +1945,10 @@
+         {
+           title: 'Translate Text',
+           description: 'Translate text between languages',
+-          inputSchema: {
++          inputSchema: z.object({
+             text: z.string(),
+             targetLanguage: z.string(),
+-          },
++          }),
+         },
+         async ({ text, targetLanguage }) => ({
+           content: [
+@@ -1965,9 +1965,9 @@
+         {
+           title: 'Bespoke Tool',
+           description: 'Do something custom',
+-          inputSchema: {
++          inputSchema: z.object({
+             query: z.string(),
+-          },
++          }),
+         },
+         async ({ query }) => ({
+           content: [{ type: 'text', text: query.toUpperCase() }],
+@@ -2083,10 +2083,10 @@
+         {
+           title: 'Translate Text',
+           description: 'Translate text between languages',
+-          inputSchema: {
++          inputSchema: z.object({
+             text: z.string(),
+             targetLanguage: z.string(),
+-          },
++          }),
+         },
+         async ({ text, targetLanguage }) => ({
+           content: [
+--- a/src/transport/nostr-transport-reconnection.test.ts
++++ b/src/transport/nostr-transport-reconnection.test.ts
+@@ -87,7 +87,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }) => ({
+         content: [{ type: 'text', text: String(a + b) }],
+--- a/src/transport/open-stream-oversized-composition.e2e.test.ts
++++ b/src/transport/open-stream-oversized-composition.e2e.test.ts
+@@ -123,11 +123,11 @@
+       {
+         title: 'Subscribe',
+         description: 'Streams two values across a release latch.',
+-        inputSchema: { topic: z.string() },
++        inputSchema: z.object({ topic: z.string() }),
+       },
+       async ({ topic }, extra) => {
+         const stream = (
+-          extra?._meta as { stream?: OpenStreamWriter } | undefined
++          extra.mcpReq._meta as { stream?: OpenStreamWriter } | undefined
+         )?.stream;
+         if (!stream) {
+           throw new Error('stream unavailable');
+@@ -150,7 +150,7 @@
+       {
+         title: 'Big',
+         description: 'Returns an oversized response payload.',
+-        inputSchema: {},
++        inputSchema: z.object({}),
+       },
+       async () => ({
+         content: [{ type: 'text', text: bigPayload }],
+@@ -178,7 +178,6 @@
+     //     the oversized path (and previously also hung it via Part A).
+     const bigResult = await fixture.client.callTool(
+       { name: 'big', arguments: {} },
+-      undefined,
+       {
+         onprogress: () => undefined,
+         resetTimeoutOnProgress: true,
+--- a/src/transport/open-stream-oversized-request.e2e.test.ts
++++ b/src/transport/open-stream-oversized-request.e2e.test.ts
+@@ -134,11 +134,11 @@
+       {
+         title: 'Subscribe',
+         description: 'Streams two chunks, echoing the inbound filter prefix.',
+-        inputSchema: { filter: z.string() },
++        inputSchema: z.object({ filter: z.string() }),
+       },
+       async ({ filter }, extra) => {
+         const stream = (
+-          extra?._meta as { stream?: OpenStreamWriter } | undefined
++          extra.mcpReq._meta as { stream?: OpenStreamWriter } | undefined
+         )?.stream;
+         if (!stream) {
+           throw new Error('stream unavailable');
+--- a/src/transport/open-stream-progress-token-conflict.e2e.test.ts
++++ b/src/transport/open-stream-progress-token-conflict.e2e.test.ts
+@@ -71,11 +71,11 @@
+       {
+         title: 'Subscribe',
+         description: 'Streams two values across a release latch.',
+-        inputSchema: { topic: z.string() },
++        inputSchema: z.object({ topic: z.string() }),
+       },
+       async ({ topic }, extra) => {
+         const stream = (
+-          extra?._meta as { stream?: OpenStreamWriter } | undefined
++          extra.mcpReq._meta as { stream?: OpenStreamWriter } | undefined
+         )?.stream;
+         if (!stream) {
+           throw new Error('stream unavailable');
+@@ -100,7 +100,7 @@
+       {
+         title: 'Ping',
+         description: 'Plain request/response tool (no streaming).',
+-        inputSchema: {},
++        inputSchema: z.object({}),
+       },
+       async () => ({
+         content: [{ type: 'text', text: 'pong' }],
+@@ -129,7 +129,6 @@
+     const progressTicks: number[] = [];
+     const pingResult = await fixture.client.callTool(
+       { name: 'ping', arguments: {} },
+-      undefined,
+       {
+         onprogress: (progress: unknown) => {
+           progressTicks.push(Number(progress));
+@@ -170,7 +169,7 @@
+       {
+         title: 'Ping',
+         description: 'Plain request/response tool (no streaming).',
+-        inputSchema: {},
++        inputSchema: z.object({}),
+       },
+       async () => ({
+         content: [{ type: 'text', text: 'pong' }],
+@@ -182,7 +181,6 @@
+ 
+     const result = await fixture.client.callTool(
+       { name: 'ping', arguments: {} },
+-      undefined,
+       {
+         onprogress: () => undefined,
+         resetTimeoutOnProgress: true,
+--- a/src/transport/oversized-gift-wrap.e2e.test.ts
++++ b/src/transport/oversized-gift-wrap.e2e.test.ts
+@@ -1,3 +1,4 @@
++import { z } from 'zod';
+ import { describe, expect, test } from 'bun:test';
+ import { Client } from '@contextvm/mcp-sdk/client';
+ import { McpServer } from '@contextvm/mcp-sdk/server/mcp';
+@@ -143,7 +144,7 @@
+         {
+           title: 'Big',
+           description: 'Returns an oversized response payload.',
+-          inputSchema: {},
++          inputSchema: z.object({}),
+         },
+         async () => ({ content: [{ type: 'text', text: bigPayload }] }),
+       );
+@@ -177,7 +178,6 @@
+       // the proactive oversized path — the path that broke under encryption.
+       const result = await client.callTool(
+         { name: 'big', arguments: {} },
+-        undefined,
+         { onprogress: () => undefined, resetTimeoutOnProgress: true },
+       );
+ 
+--- a/src/transport/payments-flow.test.ts
++++ b/src/transport/payments-flow.test.ts
+@@ -133,7 +133,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }: { a: number; b: number }) => ({
+         content: [{ type: 'text', text: String(a + b) }],
+@@ -209,7 +209,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }: { a: number; b: number }) => ({
+         content: [{ type: 'text', text: String(a + b) }],
+@@ -317,7 +317,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }: { a: number; b: number }) => ({
+         content: [{ type: 'text' as const, text: String(a + b) }],
+@@ -405,7 +405,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }: { a: number; b: number }) => ({
+         content: [{ type: 'text', text: String(a + b) }],
+@@ -489,7 +489,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }: { a: number; b: number }) => ({
+         content: [{ type: 'text', text: String(a + b) }],
+@@ -942,7 +942,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }: { a: number; b: number }) => ({
+         content: [{ type: 'text', text: String(a + b) }],
+@@ -1005,7 +1005,6 @@
+ 
+     const result = await client.callTool(
+       { name: 'add', arguments: { a: 3, b: 4 } },
+-      undefined,
+       {
+         // Short timeout: processing (≈545 ms) exceeds this without a reset.
+         timeout: 400,
+@@ -1039,7 +1038,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }: { a: number; b: number }) => {
+         toolCallCount++;
+@@ -1134,7 +1133,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }: { a: number; b: number }) => {
+         return { content: [{ type: 'text', text: String(a + b) }] };
+@@ -1220,7 +1219,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }: { a: number; b: number }) => {
+         toolCallCount++;
+@@ -1317,7 +1316,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }: { a: number; b: number }) => {
+         toolCallCount++;
+@@ -1397,7 +1396,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }: { a: number; b: number }) => {
+         toolCallCount++;
+@@ -1482,7 +1481,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }: { a: number; b: number }) => {
+         toolCallCount++;
+@@ -1597,7 +1596,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }: { a: number; b: number }) => {
+         toolCallCount++;
+@@ -1694,7 +1693,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }: { a: number; b: number }) => {
+         return { content: [{ type: 'text', text: String(a + b) }] };
+@@ -1766,7 +1765,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }: { a: number; b: number }) => {
+         toolCallCount++;
+@@ -1845,7 +1844,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }: { a: number; b: number }) => {
+         toolCallCount++;
+@@ -1930,7 +1929,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }: { a: number; b: number }) => {
+         return { content: [{ type: 'text', text: String(a + b) }] };
+@@ -2038,7 +2037,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }: { a: number; b: number }) => {
+         return { content: [{ type: 'text', text: String(a + b) }] };
+@@ -2143,7 +2142,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }: { a: number; b: number }) => {
+         return { content: [{ type: 'text', text: String(a + b) }] };
+@@ -2227,7 +2226,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }: { a: number; b: number }) => {
+         return { content: [{ type: 'text', text: String(a + b) }] };
+@@ -2337,7 +2336,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }: { a: number; b: number }) => {
+         toolCallCount++;
+@@ -2468,7 +2467,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }: { a: number; b: number }) => {
+         toolCallCount++;
+@@ -2532,7 +2531,7 @@
+     // --- Call A: priced → -32042, declined by the client. ---
+     await sleepPastSecondBoundary();
+     await expect(
+-      client.callTool(params, undefined, {
++      client.callTool(params, {
+         onprogress: () => undefined,
+         resetTimeoutOnProgress: true,
+       }),
+@@ -2551,7 +2550,7 @@
+     //     Call B matches Call A's paid grant → claims it → forwards to the
+     //     handler → returns the result. No fresh -32042, no second payment. ---
+     await sleepPastSecondBoundary();
+-    const result = await client.callTool(params, undefined, {
++    const result = await client.callTool(params, {
+       onprogress: () => undefined,
+       resetTimeoutOnProgress: true,
+     });
+--- a/src/transport/payments-multi-client-disconnect.e2e.test.ts
++++ b/src/transport/payments-multi-client-disconnect.e2e.test.ts
+@@ -112,7 +112,7 @@
+       {
+         title: 'Addition Tool',
+         description: 'Add two numbers',
+-        inputSchema: { a: z.number(), b: z.number() },
++        inputSchema: z.object({ a: z.number(), b: z.number() }),
+       },
+       async ({ a, b }: { a: number; b: number }) => ({
+         content: [{ type: 'text', text: String(a + b) }],

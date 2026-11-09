@@ -38,7 +38,7 @@ Excluded: Streamable HTTP, legacy SSE and WebSocket transports, Express/Hono/Fas
 
 The published artifact is one package. Internal upstream workspace packages are bundled and are not published as dependencies. Import paths accept both extensionless and `.js` aliases, including `client/index.js`, `server/mcp.js`, `types.js`, `inMemory`, and `shared/transport`.
 
-See [migration](docs/migration.md), [protocol policy](docs/protocol-versions.md), and [fork baseline](docs/fork-baseline.md).
+See [migration](docs/migration.md), [protocol policy](docs/protocol-versions.md), [fork baseline](docs/fork-baseline.md), and the [CVM upgrade report](docs/cvm-sdk-upgrade.md).
 
 ## Develop
 
@@ -57,3 +57,5 @@ Package checks install a packed artifact into a temporary project and verify exp
 ## License
 
 Upstream contributions include Apache-2.0 and earlier MIT code. The published package includes the complete [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+For differential and pinned-consumer acceptance, run `pnpm test:acceptance` with Bun 1.3.14 installed. See the CVM report for generated evidence and optional local cache inputs.

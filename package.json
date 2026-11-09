@@ -28,7 +28,12 @@
         "test:all": "vitest run",
         "docs:check": "node scripts/check-docs.mjs",
         "test:package": "node scripts/check-package.mjs",
-        "check:all": "pnpm typecheck:all && pnpm lint:all && pnpm test:all && pnpm docs:check && pnpm test:package"
+        "check:all": "pnpm typecheck:all && pnpm lint:all && pnpm test:all && pnpm docs:check && pnpm test:package",
+        "test:wire": "node scripts/check-wire.mjs",
+        "test:cvm": "node scripts/check-cvm.mjs",
+        "test:conformance": "vitest run packages/core-internal/test/wire packages/core-internal/test/spec.types.2025-11-25.test.ts packages/client/test/client/stdio.test.ts packages/server/test/server/stdio.test.ts",
+        "test:acceptance": "pnpm test:package && pnpm test:wire && pnpm test:stdio && pnpm test:cvm",
+        "test:stdio": "node scripts/check-stdio.mjs"
     },
     "devDependencies": {
         "@cfworker/json-schema": "catalog:runtimeShared",

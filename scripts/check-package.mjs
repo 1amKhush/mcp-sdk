@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { runInNewContext } from 'node:vm';
 import { join } from 'node:path';
 import { build } from 'esbuild';
 import ts from 'typescript';
@@ -29,21 +30,48 @@ try {
     const browser = await build({
         stdin: {
             contents:
-                "import { Client } from '@contextvm/mcp-sdk/client'; import { McpServer } from '@contextvm/mcp-sdk/server'; import { InMemoryTransport } from '@contextvm/mcp-sdk/inMemory'; console.log(Client, McpServer, InMemoryTransport);",
+                "import { Client } from '@contextvm/mcp-sdk/client'; import { McpServer } from '@contextvm/mcp-sdk/server'; import { InMemoryTransport } from '@contextvm/mcp-sdk/inMemory'; globalThis.smoke = (async () => { const [a,b] = InMemoryTransport.createLinkedPair(); const server = new McpServer({name:'browser',version:'1'}); const client = new Client({name:'browser',version:'1'}); await server.connect(b); await client.connect(a); await client.ping(); await client.close(); await server.close(); })();",
             resolveDir: directory
         },
         bundle: true,
         platform: 'browser',
-        format: 'esm',
+        format: 'iife',
         write: false,
         metafile: true
     });
     assert(!Object.keys(browser.metafile.inputs).some(path => /cross-spawn|child_process|client-stdio|server-stdio|shims-node/.test(path)));
+    const browserRealm = Object.fromEntries(
+        [
+            'TextEncoder',
+            'TextDecoder',
+            'URL',
+            'URLSearchParams',
+            'AbortController',
+            'AbortSignal',
+            'Headers',
+            'Request',
+            'Response',
+            'crypto',
+            'console',
+            'setTimeout',
+            'clearTimeout',
+            'setInterval',
+            'clearInterval',
+            'queueMicrotask',
+            'fetch',
+            'atob',
+            'btoa'
+        ].map(name => [name, globalThis[name]])
+    );
+    runInNewContext(browser.outputFiles[0].text, browserRealm);
+    await browserRealm.smoke;
     const fixture = join(directory, 'types.mts');
     writeFileSync(
         fixture,
         "import { Client, McpServer, type Transport } from '@contextvm/mcp-sdk'; import { StdioClientTransport } from '@contextvm/mcp-sdk/client/stdio.js'; import { InitializeResultSchema, type JSONRPCMessage } from '@contextvm/mcp-sdk/types.js'; const c = new Client({ name: 'c', version: '1' }); const s = new McpServer({ name: 's', version: '1' }); let t: Transport; let m: JSONRPCMessage; void [c,s,StdioClientTransport,InitializeResultSchema];\n"
     );
+    const cjsFixture = join(directory, 'types.cts');
+    writeFileSync(cjsFixture, readFileSync(fixture));
     execFileSync(
         process.execPath,
         [
@@ -58,7 +86,8 @@ try {
             '--skipLibCheck',
             '--typeRoots',
             join(workspaceRoot, 'node_modules/@types'),
-            fixture
+            fixture,
+            cjsFixture
         ],
         { cwd: directory, stdio: 'pipe' }
     );
