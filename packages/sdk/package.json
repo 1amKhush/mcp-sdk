@@ -1,6 +1,6 @@
 {
     "name": "@contextvm/mcp-sdk",
-    "version": "2.3.1",
+    "version": "2.4.0",
     "description": "MCP protocol core and stdio transports for ContextVM",
     "type": "module",
     "license": "Apache-2.0",
