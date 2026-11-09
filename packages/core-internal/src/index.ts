@@ -1,16 +1,11 @@
-export * from './auth/errors';
 export * from './errors/crossBundleBrand';
 export * from './errors/sdkErrors';
-export * from './shared/auth';
-export * from './shared/authUtils';
 export * from './shared/clientCapabilityRequirements';
 export * from './shared/envelope';
-export * from './shared/inboundClassification';
 export * from './shared/inputRequired';
 export * from './shared/inputRequiredDriver';
 export * from './shared/inputRequiredEngine';
 export * from './shared/mcpParamHeaders';
-export * from './shared/mediaType';
 export * from './shared/metadataUtils';
 export * from './shared/protocol';
 export * from './shared/protocolEras';
@@ -49,3 +44,4 @@ export { normalizeContentlessToolResult, TOOL_RESULT_FOREIGN_FAMILY_KEYS } from 
 // runtime-shaped root exports that the package root does not provide.
 export * from './validators/fromJsonSchema';
 export type { JsonSchemaType, JsonSchemaValidator, jsonSchemaValidator, JsonSchemaValidatorResult } from './validators/types';
+export * from './shared/inboundClassification';

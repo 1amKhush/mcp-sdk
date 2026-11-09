@@ -123,39 +123,16 @@
     ],
     "scripts": {
         "typecheck": "tsgo -p tsconfig.json --noEmit",
-        "build": "tsdown",
-        "build:watch": "tsdown --watch",
-        "prepack": "pnpm run build",
-        "lint": "eslint src/ && prettier --ignore-path ../../.prettierignore --check .",
-        "lint:fix": "eslint src/ --fix && prettier --ignore-path ../../.prettierignore --write .",
-        "check": "pnpm run typecheck && pnpm run lint",
-        "test": "vitest run",
-        "test:watch": "vitest"
+        "test": "vitest run"
     },
     "dependencies": {
         "@modelcontextprotocol/core": "workspace:*",
         "zod": "catalog:runtimeShared"
     },
     "devDependencies": {
-        "@cfworker/json-schema": "catalog:runtimeShared",
-        "ajv": "catalog:runtimeShared",
-        "ajv-formats": "catalog:runtimeShared",
-        "@eslint/js": "catalog:devTools",
-        "@modelcontextprotocol/core-internal": "workspace:^",
         "@modelcontextprotocol/eslint-config": "workspace:^",
-        "@modelcontextprotocol/test-helpers": "workspace:^",
         "@modelcontextprotocol/tsconfig": "workspace:^",
-        "@modelcontextprotocol/vitest-config": "workspace:^",
-        "@types/eventsource": "catalog:devTools",
-        "@typescript/native-preview": "catalog:devTools",
-        "eslint": "catalog:devTools",
-        "eslint-config-prettier": "catalog:devTools",
-        "eslint-plugin-n": "catalog:devTools",
-        "prettier": "catalog:devTools",
-        "supertest": "catalog:devTools",
-        "tsdown": "catalog:devTools",
-        "typescript": "catalog:devTools",
-        "typescript-eslint": "catalog:devTools",
-        "vitest": "catalog:devTools"
-    }
+        "@modelcontextprotocol/vitest-config": "workspace:^"
+    },
+    "private": true
 }

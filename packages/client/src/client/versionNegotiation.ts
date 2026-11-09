@@ -25,7 +25,6 @@ import {
     SUPPORTED_MODERN_PROTOCOL_VERSIONS
 } from '@modelcontextprotocol/core-internal';
 
-import { UnauthorizedError } from './auth';
 import { isAuthSeamEscape } from './authSeam';
 import type { ProbeEnvironment, ProbeOutcome, ProbeTransportKind, ProbeVerdict } from './probeClassifier';
 import { classifyProbeOutcome } from './probeClassifier';
@@ -403,7 +402,6 @@ function normalizeReply(reply: RawProbeReply, timeoutMs: number): ProbeOutcome {
                 // UnauthorizedError by brand, or by name for one thrown by a
                 // differently bundled SDK copy at a skewed version or an auth
                 // middleware's own class.
-                error instanceof UnauthorizedError ||
                 (error instanceof Error && error.name === 'UnauthorizedError');
             if (isAuthOutcome) {
                 // Auth-gated server: propagate unchanged.

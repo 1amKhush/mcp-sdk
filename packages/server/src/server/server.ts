@@ -62,7 +62,7 @@ import {
     SdkErrorCode,
     withRequestStateValue
 } from '@modelcontextprotocol/core-internal';
-import { DefaultJsonSchemaValidator } from '@modelcontextprotocol/server/_shims';
+import { DefaultJsonSchemaValidator } from '@contextvm/mcp-sdk/_shims';
 
 import { coerceEmbeddedInputRequest, LegacyInputRequiredShim, resolveLegacyShimOptions } from './legacyInputRequiredShim';
 

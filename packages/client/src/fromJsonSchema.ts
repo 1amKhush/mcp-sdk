@@ -1,4 +1,4 @@
-import { DefaultJsonSchemaValidator } from '@modelcontextprotocol/client/_shims';
+import { DefaultJsonSchemaValidator } from '@contextvm/mcp-sdk/_shims';
 import type { JsonSchemaType, jsonSchemaValidator, StandardSchemaWithJSON } from '@modelcontextprotocol/core-internal';
 import { fromJsonSchema as coreFromJsonSchema } from '@modelcontextprotocol/core-internal';
 

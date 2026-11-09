@@ -189,17 +189,3 @@ export {
 // `isSpecType.IdJagTokenExchangeResponse`, etc. exist). The typeless internal URL field-validators
 // (SafeUrlSchema, OptionalSafeUrlSchema) are not auth schemas and stay out. The coreSchemas test
 // asserts this group stays in sync with core-internal's `authSchemas`.
-export {
-    IdJagTokenExchangeResponseSchema,
-    OAuthClientInformationFullSchema,
-    OAuthClientInformationSchema,
-    OAuthClientMetadataSchema,
-    OAuthClientRegistrationErrorSchema,
-    OAuthErrorResponseSchema,
-    OAuthMetadataSchema,
-    OAuthProtectedResourceMetadataSchema,
-    OAuthTokenRevocationRequestSchema,
-    OAuthTokensSchema,
-    OpenIdProviderDiscoveryMetadataSchema,
-    OpenIdProviderMetadataSchema
-} from './auth';

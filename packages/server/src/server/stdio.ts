@@ -2,7 +2,7 @@ import type { Readable, Writable } from 'node:stream';
 
 import type { JSONRPCMessage, Transport } from '@modelcontextprotocol/core-internal';
 import { ReadBuffer, serializeMessage } from '@modelcontextprotocol/core-internal';
-import { process } from '@modelcontextprotocol/server/_shims';
+import process from 'node:process';
 
 /**
  * Marks a stdout `'error'` listener that a closed transport left attached purely to

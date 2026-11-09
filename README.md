@@ -1,177 +1,59 @@
-# MCP TypeScript SDK
+# @contextvm/mcp-sdk
 
-<!-- prettier-ignore -->
-> [!IMPORTANT]
-> **This is the `main` branch: v2 of the SDK** (`@modelcontextprotocol/server`, `@modelcontextprotocol/client`), the stable release line, implementing the [2026-07-28 MCP spec](https://modelcontextprotocol.io/specification/2026-07-28). Start with the [v2 documentation](https://ts.sdk.modelcontextprotocol.io/v2/); coming from v1, see the [migration guide](https://ts.sdk.modelcontextprotocol.io/v2/migration/upgrade-to-v2).
->
-> **v1.x** (`@modelcontextprotocol/sdk`) lives on the [`v1.x` branch](https://github.com/modelcontextprotocol/typescript-sdk/tree/v1.x) and continues to receive bug fixes and security updates for at least six months after the v2 release (2026-07-27). Its documentation is at [ts.sdk.modelcontextprotocol.io](https://ts.sdk.modelcontextprotocol.io/).
->
-> Found a problem in v2? [Open an issue](https://github.com/modelcontextprotocol/typescript-sdk/issues/new?template=v2-feedback.yml).
+A lightweight MCP TypeScript SDK for ContextVM: protocol core, client/server APIs, custom transports, validation, and stdio.
 
-<!-- prettier-ignore -->
-> [!NOTE]
-> **Contributors without write access can have one open pull request at a time.** Draft pull requests don't count toward the limit. For a feature or a larger change, please [open an issue](https://github.com/modelcontextprotocol/typescript-sdk/issues/new/choose) first; see [CONTRIBUTING.md](CONTRIBUTING.md).
+This v2 fork tracks [upstream v2.3.1](https://github.com/modelcontextprotocol/typescript-sdk/releases/tag/v2.3.1), commit `fcef852f6cdafea07f36cf6fae69b37c8adf85be`. The v1 package remains on the `v1.x` maintenance branch.
 
-[![NPM Version - Server](https://img.shields.io/npm/v/%40modelcontextprotocol%2Fserver?label=%40modelcontextprotocol%2Fserver)](https://www.npmjs.com/package/@modelcontextprotocol/server)
-[![NPM Version - Client](https://img.shields.io/npm/v/%40modelcontextprotocol%2Fclient?label=%40modelcontextprotocol%2Fclient)](https://www.npmjs.com/package/@modelcontextprotocol/client) ![Apache-2.0 licensed](https://img.shields.io/npm/l/%40modelcontextprotocol%2Fserver)
+## Install
 
-<details>
-<summary>Table of Contents</summary>
-
-- [Overview](#overview)
-- [Packages](#packages)
-- [Installation](#installation)
-- [Getting Started](#getting-started)
-- [Documentation](#documentation)
-- [Contributing](#contributing)
-- [License](#license)
-
-</details>
-
-## Overview
-
-The Model Context Protocol (MCP) allows applications to provide context for LLMs in a standardized way, separating the concerns of providing context from the actual LLM interaction.
-
-This repository contains the TypeScript SDK implementation of the MCP specification. It runs on **Node.js**, **Bun**, and **Deno**, and ships:
-
-- MCP **server** libraries (tools/resources/prompts, Streamable HTTP, stdio, auth helpers)
-- MCP **client** libraries (transports, high-level helpers, OAuth helpers)
-- Optional **middleware packages** for specific runtimes/frameworks (Express, Fastify, Hono, Node.js HTTP)
-- Runnable **examples** (under [`examples/`](https://github.com/modelcontextprotocol/typescript-sdk/tree/main/examples))
-
-## Packages
-
-This monorepo publishes split packages:
-
-- **`@modelcontextprotocol/server`**: build MCP servers
-- **`@modelcontextprotocol/client`**: build MCP clients
-
-Tool and prompt schemas use [Standard Schema](https://standardschema.dev/) — bring Zod v4, Valibot, ArkType, or any compatible library.
-
-### Middleware packages (optional)
-
-The SDK also publishes small "middleware" packages under [`packages/middleware/`](https://github.com/modelcontextprotocol/typescript-sdk/tree/main/packages/middleware) that help you **wire MCP into a specific runtime or web framework**.
-
-They are intentionally thin adapters: they should not introduce new MCP functionality or business logic. See [`packages/middleware/README.md`](packages/middleware/README.md) for details.
-
-- **`@modelcontextprotocol/node`**: Node.js Streamable HTTP transport wrapper for `IncomingMessage` / `ServerResponse`
-- **`@modelcontextprotocol/express`**: Express helpers (app defaults + Host header validation)
-- **`@modelcontextprotocol/fastify`**: Fastify helpers (app defaults + Host header validation)
-- **`@modelcontextprotocol/hono`**: Hono helpers (app defaults + JSON body parsing hook + Host header validation)
-
-## Installation
-
-### Server
-
-```bash
-npm install @modelcontextprotocol/server
-# or
-bun add @modelcontextprotocol/server
-# or
-deno add npm:@modelcontextprotocol/server
+```sh
+npm install @contextvm/mcp-sdk@2.3.1 zod@^4.2.0
 ```
 
-### Client
+Requires Node 20+ for process transports. Core/custom-transport imports also bundle for browsers. Stdio imports are Node-only.
 
-```bash
-npm install @modelcontextprotocol/client
-# or
-bun add @modelcontextprotocol/client
-# or
-deno add npm:@modelcontextprotocol/client
-```
+## Server
 
-### Optional middleware packages
-
-The SDK also publishes optional “middleware” packages that help you **wire MCP into a specific runtime or web framework** (for example Express, Fastify, Hono, or Node.js `http`).
-
-These packages are intentionally thin adapters and should not introduce additional MCP features or business logic. See [`packages/middleware/README.md`](packages/middleware/README.md) for details.
-
-```bash
-# Node.js HTTP (IncomingMessage/ServerResponse) Streamable HTTP transport:
-npm install @modelcontextprotocol/node
-
-# Express integration:
-npm install @modelcontextprotocol/express express
-
-# Fastify integration:
-npm install @modelcontextprotocol/fastify fastify
-
-# Hono integration:
-npm install @modelcontextprotocol/hono hono
-```
-
-## Getting Started
-
-Here is what an MCP server looks like. This minimal example exposes a single `greet` tool over stdio:
-
-```typescript
-import { McpServer } from '@modelcontextprotocol/server';
-import { StdioServerTransport } from '@modelcontextprotocol/server/stdio';
+```ts
+import { McpServer } from '@contextvm/mcp-sdk/server/mcp';
+import { StdioServerTransport } from '@contextvm/mcp-sdk/server/stdio';
 import * as z from 'zod/v4';
 
-const server = new McpServer({ name: 'greeting-server', version: '1.0.0' });
-
+const server = new McpServer({ name: 'echo', version: '1.0.0' });
 server.registerTool(
-    'greet',
+    'echo',
     {
-        description: 'Greet someone by name',
-        inputSchema: z.object({ name: z.string() })
+        inputSchema: z.object({ text: z.string() })
     },
-    async ({ name }) => ({
-        content: [{ type: 'text', text: `Hello, ${name}!` }]
-    })
+    async ({ text }) => ({ content: [{ type: 'text', text }] })
 );
-
-async function main() {
-    const transport = new StdioServerTransport();
-    await server.connect(transport);
-}
-
-main();
+await server.connect(new StdioServerTransport());
 ```
 
-Ready to build something real? Follow the step-by-step tutorials:
+## Fork scope
 
-- [Build your first server](docs/get-started/first-server.md) — a stdio weather-alert server, from `npm init` to a tool call
-- [Build your first client](docs/get-started/first-client.md) — connect to that server, list its tools, and call them
+Retained: `Client`, `Server`, `McpServer`, protocol types and Zod schemas, tools/resources/prompts, sampling, elicitation, progress/cancellation, custom `Transport`, in-memory transports, stdio, and runtime-selected JSON Schema validation.
 
-For runnable, end-to-end examples beyond the tutorials, see:
+Excluded: Streamable HTTP, legacy SSE and WebSocket transports, Express/Hono/Fastify/Node HTTP adapters, OAuth providers and middleware, migration codemods, and experimental task execution. Deprecated task wire types remain available where required for interoperability. Shared envelope/negotiation helpers remain because stdio and custom transports use them; their presence does not add an HTTP server.
 
-- [`examples/README.md`](examples/README.md) — runnable, self-verifying client/server example pairs (one story per directory)
+The published artifact is one package. Internal upstream workspace packages are bundled and are not published as dependencies. Import paths accept both extensionless and `.js` aliases, including `client/index.js`, `server/mcp.js`, `types.js`, `inMemory`, and `shared/transport`.
 
-## Documentation
+See [migration](docs/migration.md), [protocol policy](docs/protocol-versions.md), and [fork baseline](docs/fork-baseline.md).
 
-- [Build a server](docs/get-started/first-server.md) — your first MCP server, step by step
-- [Build a client](docs/get-started/first-client.md) — your first MCP client, step by step
-- [Documentation site](https://ts.sdk.modelcontextprotocol.io/v2/) — the full guides: tools, resources, prompts, serving over HTTP and stdio, clients, OAuth, and migration
-- [Troubleshooting](docs/troubleshooting.md) — common errors and their fixes
-- [API reference](https://ts.sdk.modelcontextprotocol.io/v2/api/)
-- [MCP documentation](https://modelcontextprotocol.io/docs)
-- [MCP specification](https://modelcontextprotocol.io/specification/latest)
+## Develop
 
-### Building docs locally
-
-To work on the documentation site locally:
-
-```bash
-pnpm docs:api      # Generate the API reference markdown (output: docs/api/)
-pnpm docs:dev      # Start the VitePress dev server for the V2 site
-pnpm docs:build    # Build the V2 site (output: docs/.vitepress/dist/)
-pnpm docs:multi    # Build the combined V1 + V2 site (output: tmp/docs-combined/)
+```sh
+pnpm install --frozen-lockfile
+pnpm build:all
+pnpm typecheck:all
+pnpm lint:all
+pnpm test:all
+pnpm docs:check
+pnpm test:package
 ```
 
-The `docs:multi` script builds the V2 site from the current checkout, checks out the `v1.x` branch via a git worktree to build the V1 site, and produces a combined site with V1 docs at the root and V2 docs under `/v2/`.
-
-## v1 (legacy) documentation and fixes
-
-If you are using the **v1** generation of the SDK, the **v1 API documentation** is available at [`https://ts.sdk.modelcontextprotocol.io/`](https://ts.sdk.modelcontextprotocol.io/). The v1 source code and any v1-specific fixes live on the long-lived
-[`v1.x` branch](https://github.com/modelcontextprotocol/typescript-sdk/tree/v1.x). V2 API docs are at [`/v2/`](https://ts.sdk.modelcontextprotocol.io/v2/).
-
-## Contributing
-
-Issues and pull requests are welcome on GitHub at <https://github.com/modelcontextprotocol/typescript-sdk>.
+Package checks install a packed artifact into a temporary project and verify exports, declarations, CJS/ESM, and browser bundling. They require registry access on a cold cache. Stdio tests require subprocess access.
 
 ## License
 
-This project is licensed under the Apache License 2.0 for new contributions, with existing code under MIT. See the [LICENSE](LICENSE) file for details.
+Upstream contributions include Apache-2.0 and earlier MIT code. The published package includes the complete [LICENSE](LICENSE) and [NOTICE](NOTICE).

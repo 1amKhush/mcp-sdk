@@ -74,7 +74,7 @@ import {
     validateEnvelopeMeta
 } from '@modelcontextprotocol/core-internal';
 
-import type { McpServerFactory } from './createMcpHandler';
+import type { McpServerFactory } from './factory';
 import { DEFAULT_MAX_SUBSCRIPTIONS, StdioListenRouter } from './listenRouter';
 import { McpServer } from './mcp';
 import type { Server } from './server';

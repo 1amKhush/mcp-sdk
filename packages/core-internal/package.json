@@ -44,59 +44,16 @@
     },
     "scripts": {
         "typecheck": "tsgo -p tsconfig.json --noEmit",
-        "lint": "eslint src/ && prettier --ignore-path ../../.prettierignore --check .",
-        "lint:fix": "eslint src/ --fix && prettier --ignore-path ../../.prettierignore --write .",
-        "check": "pnpm run typecheck && pnpm run lint",
-        "test": "vitest run",
-        "test:watch": "vitest"
+        "test": "vitest run"
     },
     "dependencies": {
         "@modelcontextprotocol/core": "workspace:*",
-        "content-type": "catalog:runtimeShared",
         "json-schema-typed": "catalog:runtimeShared",
         "zod": "catalog:runtimeShared"
-    },
-    "peerDependencies": {
-        "@cfworker/json-schema": "catalog:runtimeShared",
-        "ajv": "catalog:runtimeShared",
-        "ajv-formats": "catalog:runtimeShared",
-        "zod": "catalog:runtimeShared"
-    },
-    "peerDependenciesMeta": {
-        "@cfworker/json-schema": {
-            "optional": true
-        },
-        "ajv": {
-            "optional": true
-        },
-        "ajv-formats": {
-            "optional": true
-        },
-        "zod": {
-            "optional": false
-        }
     },
     "devDependencies": {
         "@modelcontextprotocol/tsconfig": "workspace:^",
         "@modelcontextprotocol/vitest-config": "workspace:^",
-        "@modelcontextprotocol/eslint-config": "workspace:^",
-        "@cfworker/json-schema": "catalog:runtimeShared",
-        "ajv": "catalog:runtimeShared",
-        "ajv-formats": "catalog:runtimeShared",
-        "@eslint/js": "catalog:devTools",
-        "@types/content-type": "catalog:devTools",
-        "@types/cors": "catalog:devTools",
-        "@types/cross-spawn": "catalog:devTools",
-        "@types/eventsource": "catalog:devTools",
-        "@types/express": "catalog:devTools",
-        "@types/express-serve-static-core": "catalog:devTools",
-        "@typescript/native-preview": "catalog:devTools",
-        "eslint": "catalog:devTools",
-        "eslint-config-prettier": "catalog:devTools",
-        "eslint-plugin-n": "catalog:devTools",
-        "prettier": "catalog:devTools",
-        "typescript": "catalog:devTools",
-        "typescript-eslint": "catalog:devTools",
-        "vitest": "catalog:devTools"
+        "@modelcontextprotocol/eslint-config": "workspace:^"
     }
 }

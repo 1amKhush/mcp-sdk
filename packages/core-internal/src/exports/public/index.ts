@@ -9,38 +9,9 @@
  * packages.
  */
 
-// Auth error classes
-export { OAuthError, OAuthErrorCode } from '../../auth/errors';
-
 // SDK error types (local errors that never cross the wire)
 export type { SdkHttpErrorData } from '../../errors/sdkErrors';
 export { SdkError, SdkErrorCode, SdkHttpError } from '../../errors/sdkErrors';
-
-// Auth TypeScript types (NOT Zod schemas like OAuthMetadataSchema)
-export type {
-    AuthorizationServerMetadata,
-    IdJagTokenExchangeResponse,
-    OAuthClientInformation,
-    OAuthClientInformationFull,
-    OAuthClientInformationMixed,
-    OAuthClientMetadata,
-    OAuthClientRegistrationError,
-    OAuthErrorResponse,
-    OAuthMetadata,
-    OAuthProtectedResourceMetadata,
-    OAuthTokenRevocationRequest,
-    OAuthTokens,
-    OpenIdProviderDiscoveryMetadata,
-    OpenIdProviderMetadata,
-    StoredOAuthClientInformation,
-    StoredOAuthTokens
-} from '../../shared/auth';
-
-// Auth utilities
-export { checkResourceAllowed, resourceUrlFromServerUrl } from '../../shared/authUtils';
-
-// Media-type utilities (for transport and framework-adapter authors)
-export { isJsonContentType } from '../../shared/mediaType';
 
 // Metadata utilities
 export { getDisplayName } from '../../shared/metadataUtils';

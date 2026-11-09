@@ -1,0 +1,500 @@
+{
+    "name": "@contextvm/mcp-sdk",
+    "version": "2.3.1",
+    "description": "MCP protocol core and stdio transports for ContextVM",
+    "type": "module",
+    "license": "Apache-2.0",
+    "engines": {
+        "node": ">=20"
+    },
+    "sideEffects": false,
+    "main": "./dist/index.cjs",
+    "module": "./dist/index.mjs",
+    "types": "./dist/index.d.mts",
+    "exports": {
+        ".": {
+            "import": {
+                "types": "./dist/index.d.mts",
+                "default": "./dist/index.mjs"
+            },
+            "require": {
+                "types": "./dist/index.d.cts",
+                "default": "./dist/index.cjs"
+            }
+        },
+        "./client": {
+            "import": {
+                "types": "./dist/client.d.mts",
+                "default": "./dist/client.mjs"
+            },
+            "require": {
+                "types": "./dist/client.d.cts",
+                "default": "./dist/client.cjs"
+            }
+        },
+        "./client.js": {
+            "import": {
+                "types": "./dist/client.d.mts",
+                "default": "./dist/client.mjs"
+            },
+            "require": {
+                "types": "./dist/client.d.cts",
+                "default": "./dist/client.cjs"
+            }
+        },
+        "./client/index": {
+            "import": {
+                "types": "./dist/client.d.mts",
+                "default": "./dist/client.mjs"
+            },
+            "require": {
+                "types": "./dist/client.d.cts",
+                "default": "./dist/client.cjs"
+            }
+        },
+        "./client/index.js": {
+            "import": {
+                "types": "./dist/client.d.mts",
+                "default": "./dist/client.mjs"
+            },
+            "require": {
+                "types": "./dist/client.d.cts",
+                "default": "./dist/client.cjs"
+            }
+        },
+        "./client/stdio": {
+            "import": {
+                "types": "./dist/client-stdio.d.mts",
+                "default": "./dist/client-stdio.mjs"
+            },
+            "require": {
+                "types": "./dist/client-stdio.d.cts",
+                "default": "./dist/client-stdio.cjs"
+            }
+        },
+        "./client/stdio.js": {
+            "import": {
+                "types": "./dist/client-stdio.d.mts",
+                "default": "./dist/client-stdio.mjs"
+            },
+            "require": {
+                "types": "./dist/client-stdio.d.cts",
+                "default": "./dist/client-stdio.cjs"
+            }
+        },
+        "./server": {
+            "import": {
+                "types": "./dist/server.d.mts",
+                "default": "./dist/server.mjs"
+            },
+            "require": {
+                "types": "./dist/server.d.cts",
+                "default": "./dist/server.cjs"
+            }
+        },
+        "./server.js": {
+            "import": {
+                "types": "./dist/server.d.mts",
+                "default": "./dist/server.mjs"
+            },
+            "require": {
+                "types": "./dist/server.d.cts",
+                "default": "./dist/server.cjs"
+            }
+        },
+        "./server/index": {
+            "import": {
+                "types": "./dist/server.d.mts",
+                "default": "./dist/server.mjs"
+            },
+            "require": {
+                "types": "./dist/server.d.cts",
+                "default": "./dist/server.cjs"
+            }
+        },
+        "./server/index.js": {
+            "import": {
+                "types": "./dist/server.d.mts",
+                "default": "./dist/server.mjs"
+            },
+            "require": {
+                "types": "./dist/server.d.cts",
+                "default": "./dist/server.cjs"
+            }
+        },
+        "./server/stdio": {
+            "import": {
+                "types": "./dist/server-stdio.d.mts",
+                "default": "./dist/server-stdio.mjs"
+            },
+            "require": {
+                "types": "./dist/server-stdio.d.cts",
+                "default": "./dist/server-stdio.cjs"
+            }
+        },
+        "./server/stdio.js": {
+            "import": {
+                "types": "./dist/server-stdio.d.mts",
+                "default": "./dist/server-stdio.mjs"
+            },
+            "require": {
+                "types": "./dist/server-stdio.d.cts",
+                "default": "./dist/server-stdio.cjs"
+            }
+        },
+        "./server/mcp": {
+            "import": {
+                "types": "./dist/server-mcp.d.mts",
+                "default": "./dist/server-mcp.mjs"
+            },
+            "require": {
+                "types": "./dist/server-mcp.d.cts",
+                "default": "./dist/server-mcp.cjs"
+            }
+        },
+        "./server/mcp.js": {
+            "import": {
+                "types": "./dist/server-mcp.d.mts",
+                "default": "./dist/server-mcp.mjs"
+            },
+            "require": {
+                "types": "./dist/server-mcp.d.cts",
+                "default": "./dist/server-mcp.cjs"
+            }
+        },
+        "./types": {
+            "import": {
+                "types": "./dist/types.d.mts",
+                "default": "./dist/types.mjs"
+            },
+            "require": {
+                "types": "./dist/types.d.cts",
+                "default": "./dist/types.cjs"
+            }
+        },
+        "./types.js": {
+            "import": {
+                "types": "./dist/types.d.mts",
+                "default": "./dist/types.mjs"
+            },
+            "require": {
+                "types": "./dist/types.d.cts",
+                "default": "./dist/types.cjs"
+            }
+        },
+        "./spec.types": {
+            "import": {
+                "types": "./dist/spec.types.d.mts",
+                "default": "./dist/spec.types.mjs"
+            },
+            "require": {
+                "types": "./dist/spec.types.d.cts",
+                "default": "./dist/spec.types.cjs"
+            }
+        },
+        "./spec.types.js": {
+            "import": {
+                "types": "./dist/spec.types.d.mts",
+                "default": "./dist/spec.types.mjs"
+            },
+            "require": {
+                "types": "./dist/spec.types.d.cts",
+                "default": "./dist/spec.types.cjs"
+            }
+        },
+        "./inMemory": {
+            "import": {
+                "types": "./dist/inMemory.d.mts",
+                "default": "./dist/inMemory.mjs"
+            },
+            "require": {
+                "types": "./dist/inMemory.d.cts",
+                "default": "./dist/inMemory.cjs"
+            }
+        },
+        "./inMemory.js": {
+            "import": {
+                "types": "./dist/inMemory.d.mts",
+                "default": "./dist/inMemory.mjs"
+            },
+            "require": {
+                "types": "./dist/inMemory.d.cts",
+                "default": "./dist/inMemory.cjs"
+            }
+        },
+        "./shared/protocol": {
+            "import": {
+                "types": "./dist/protocol.d.mts",
+                "default": "./dist/protocol.mjs"
+            },
+            "require": {
+                "types": "./dist/protocol.d.cts",
+                "default": "./dist/protocol.cjs"
+            }
+        },
+        "./shared/protocol.js": {
+            "import": {
+                "types": "./dist/protocol.d.mts",
+                "default": "./dist/protocol.mjs"
+            },
+            "require": {
+                "types": "./dist/protocol.d.cts",
+                "default": "./dist/protocol.cjs"
+            }
+        },
+        "./shared/transport": {
+            "import": {
+                "types": "./dist/transport.d.mts",
+                "default": "./dist/transport.mjs"
+            },
+            "require": {
+                "types": "./dist/transport.d.cts",
+                "default": "./dist/transport.cjs"
+            }
+        },
+        "./shared/transport.js": {
+            "import": {
+                "types": "./dist/transport.d.mts",
+                "default": "./dist/transport.mjs"
+            },
+            "require": {
+                "types": "./dist/transport.d.cts",
+                "default": "./dist/transport.cjs"
+            }
+        },
+        "./shared/uriTemplate": {
+            "import": {
+                "types": "./dist/uriTemplate.d.mts",
+                "default": "./dist/uriTemplate.mjs"
+            },
+            "require": {
+                "types": "./dist/uriTemplate.d.cts",
+                "default": "./dist/uriTemplate.cjs"
+            }
+        },
+        "./shared/uriTemplate.js": {
+            "import": {
+                "types": "./dist/uriTemplate.d.mts",
+                "default": "./dist/uriTemplate.mjs"
+            },
+            "require": {
+                "types": "./dist/uriTemplate.d.cts",
+                "default": "./dist/uriTemplate.cjs"
+            }
+        },
+        "./shared/stdio": {
+            "import": {
+                "types": "./dist/stdio.d.mts",
+                "default": "./dist/stdio.mjs"
+            },
+            "require": {
+                "types": "./dist/stdio.d.cts",
+                "default": "./dist/stdio.cjs"
+            }
+        },
+        "./shared/stdio.js": {
+            "import": {
+                "types": "./dist/stdio.d.mts",
+                "default": "./dist/stdio.mjs"
+            },
+            "require": {
+                "types": "./dist/stdio.d.cts",
+                "default": "./dist/stdio.cjs"
+            }
+        },
+        "./shared/auth-info": {
+            "import": {
+                "types": "./dist/auth-info.d.mts",
+                "default": "./dist/auth-info.mjs"
+            },
+            "require": {
+                "types": "./dist/auth-info.d.cts",
+                "default": "./dist/auth-info.cjs"
+            }
+        },
+        "./shared/auth-info.js": {
+            "import": {
+                "types": "./dist/auth-info.d.mts",
+                "default": "./dist/auth-info.mjs"
+            },
+            "require": {
+                "types": "./dist/auth-info.d.cts",
+                "default": "./dist/auth-info.cjs"
+            }
+        },
+        "./validation": {
+            "import": {
+                "types": "./dist/validation.d.mts",
+                "default": "./dist/validation.mjs"
+            },
+            "require": {
+                "types": "./dist/validation.d.cts",
+                "default": "./dist/validation.cjs"
+            }
+        },
+        "./validation.js": {
+            "import": {
+                "types": "./dist/validation.d.mts",
+                "default": "./dist/validation.mjs"
+            },
+            "require": {
+                "types": "./dist/validation.d.cts",
+                "default": "./dist/validation.cjs"
+            }
+        },
+        "./validation/ajv": {
+            "import": {
+                "types": "./dist/ajv.d.mts",
+                "default": "./dist/ajv.mjs"
+            },
+            "require": {
+                "types": "./dist/ajv.d.cts",
+                "default": "./dist/ajv.cjs"
+            }
+        },
+        "./validation/ajv.js": {
+            "import": {
+                "types": "./dist/ajv.d.mts",
+                "default": "./dist/ajv.mjs"
+            },
+            "require": {
+                "types": "./dist/ajv.d.cts",
+                "default": "./dist/ajv.cjs"
+            }
+        },
+        "./validation/ajv-provider": {
+            "import": {
+                "types": "./dist/ajv.d.mts",
+                "default": "./dist/ajv.mjs"
+            },
+            "require": {
+                "types": "./dist/ajv.d.cts",
+                "default": "./dist/ajv.cjs"
+            }
+        },
+        "./validation/ajv-provider.js": {
+            "import": {
+                "types": "./dist/ajv.d.mts",
+                "default": "./dist/ajv.mjs"
+            },
+            "require": {
+                "types": "./dist/ajv.d.cts",
+                "default": "./dist/ajv.cjs"
+            }
+        },
+        "./validation/cf-worker": {
+            "import": {
+                "types": "./dist/cf-worker.d.mts",
+                "default": "./dist/cf-worker.mjs"
+            },
+            "require": {
+                "types": "./dist/cf-worker.d.cts",
+                "default": "./dist/cf-worker.cjs"
+            }
+        },
+        "./validation/cf-worker.js": {
+            "import": {
+                "types": "./dist/cf-worker.d.mts",
+                "default": "./dist/cf-worker.mjs"
+            },
+            "require": {
+                "types": "./dist/cf-worker.d.cts",
+                "default": "./dist/cf-worker.cjs"
+            }
+        },
+        "./validators/ajv": {
+            "import": {
+                "types": "./dist/ajv.d.mts",
+                "default": "./dist/ajv.mjs"
+            },
+            "require": {
+                "types": "./dist/ajv.d.cts",
+                "default": "./dist/ajv.cjs"
+            }
+        },
+        "./validators/ajv.js": {
+            "import": {
+                "types": "./dist/ajv.d.mts",
+                "default": "./dist/ajv.mjs"
+            },
+            "require": {
+                "types": "./dist/ajv.d.cts",
+                "default": "./dist/ajv.cjs"
+            }
+        },
+        "./validators/cf-worker": {
+            "import": {
+                "types": "./dist/cf-worker.d.mts",
+                "default": "./dist/cf-worker.mjs"
+            },
+            "require": {
+                "types": "./dist/cf-worker.d.cts",
+                "default": "./dist/cf-worker.cjs"
+            }
+        },
+        "./validators/cf-worker.js": {
+            "import": {
+                "types": "./dist/cf-worker.d.mts",
+                "default": "./dist/cf-worker.mjs"
+            },
+            "require": {
+                "types": "./dist/cf-worker.d.cts",
+                "default": "./dist/cf-worker.cjs"
+            }
+        },
+        "./_shims": {
+            "browser": {
+                "import": {
+                    "types": "./dist/_shims-browser.d.mts",
+                    "default": "./dist/_shims-browser.mjs"
+                },
+                "require": {
+                    "types": "./dist/_shims-browser.d.cts",
+                    "default": "./dist/_shims-browser.cjs"
+                }
+            },
+            "workerd": {
+                "import": {
+                    "types": "./dist/_shims-browser.d.mts",
+                    "default": "./dist/_shims-browser.mjs"
+                },
+                "require": {
+                    "types": "./dist/_shims-browser.d.cts",
+                    "default": "./dist/_shims-browser.cjs"
+                }
+            },
+            "default": {
+                "import": {
+                    "types": "./dist/_shims-node.d.mts",
+                    "default": "./dist/_shims-node.mjs"
+                },
+                "require": {
+                    "types": "./dist/_shims-node.d.cts",
+                    "default": "./dist/_shims-node.cjs"
+                }
+            }
+        },
+        "./package.json": "./package.json"
+    },
+    "files": [
+        "dist",
+        "LICENSE",
+        "NOTICE",
+        "README.md"
+    ],
+    "publishConfig": {
+        "access": "public"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/ContextVM/mcp-sdk.git"
+    },
+    "dependencies": {
+        "zod": "catalog:runtimeShared",
+        "cross-spawn": "catalog:runtimeClientOnly"
+    },
+    "scripts": {
+        "build": "tsdown",
+        "prepack": "pnpm build"
+    }
+}
