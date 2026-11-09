@@ -6,4 +6,4 @@ Modern `2026-07-28` operation is an explicit opt-in through client `versionNegot
 
 An SDK dependency upgrade does not certify modern Nostr support. Keep existing CVM protocol behavior until its discovery, announcements, stateless emulation, subscriptions, and cancellation have been migrated and tested together.
 
-See the [pinned protocol guide](https://github.com/modelcontextprotocol/typescript-sdk/blob/v2.3.1/docs/migration/support-2026-07-28.md).
+See the [pinned protocol guide](https://github.com/modelcontextprotocol/typescript-sdk/blob/v2.4.0/docs/migration/support-2026-07-28.md).
