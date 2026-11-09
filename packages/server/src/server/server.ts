@@ -340,9 +340,7 @@ export class Server extends Protocol<ServerContext> {
 
         // server/discover is installed only when the supported-versions list
         // carries a modern revision: a legacy-only server keeps answering -32601.
-        // A hand-constructed instance is never era-bound, so the handler stays
-        // unreachable behind the era gate until a serving entry (createMcpHandler,
-        // serveStdio) marks the instance as serving the 2026-07-28 era.
+        // The handler becomes reachable when a serving entry or connect() binds a modern revision.
         if (modernProtocolVersions(this._supportedProtocolVersions).length > 0) {
             this.setRequestHandler('server/discover', () => this._ondiscover());
         }
@@ -966,8 +964,8 @@ export class Server extends Protocol<ServerContext> {
      * @deprecated Read client identity from the per-request handler context instead: on
      * 2026-07-28 (per-request envelope) requests `ctx.mcpReq.envelope` carries the client's
      * declared capabilities, while on 2025-era connections this accessor keeps returning the
-     * `initialize`-scoped value. The accessor remains functional — instances serving the
-     * 2026-07-28 era are backfilled per request from the validated envelope.
+     * `initialize`-scoped value. The accessor remains functional where `createMcpHandler`
+     * serves the 2026-07-28 era: it backfills it per request from the validated envelope.
      */
     getClientCapabilities(): ClientCapabilities | undefined {
         return this._clientCapabilities;
@@ -979,8 +977,8 @@ export class Server extends Protocol<ServerContext> {
      * @deprecated Read client identity from the per-request handler context instead: on
      * 2026-07-28 (per-request envelope) requests `ctx.mcpReq.envelope` carries the client's
      * name and version, while on 2025-era connections this accessor keeps returning the
-     * `initialize`-scoped value. The accessor remains functional — instances serving the
-     * 2026-07-28 era are backfilled per request from the validated envelope.
+     * `initialize`-scoped value. The accessor remains functional where `createMcpHandler`
+     * serves the 2026-07-28 era: it backfills it per request from the validated envelope.
      */
     getClientVersion(): Implementation | undefined {
         return this._clientVersion;
