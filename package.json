@@ -32,7 +32,8 @@
         "test:wire": "node scripts/check-wire.mjs",
         "test:cvm": "node scripts/check-cvm.mjs",
         "test:conformance": "vitest run packages/core-internal/test/wire packages/core-internal/test/spec.types.2025-11-25.test.ts packages/client/test/client/stdio.test.ts packages/server/test/server/stdio.test.ts",
-        "test:acceptance": "pnpm test:package && pnpm test:wire && pnpm test:stdio && pnpm test:cvm",
+        "test:acceptance": "pnpm test:package && pnpm test:wire && pnpm test:upgrade && pnpm test:stdio && pnpm test:cvm",
+        "test:upgrade": "node scripts/check-upgrade.mjs",
         "test:stdio": "node scripts/check-stdio.mjs"
     },
     "devDependencies": {

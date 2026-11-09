@@ -58,4 +58,4 @@ Package checks install a packed artifact into a temporary project and verify exp
 
 Upstream contributions include Apache-2.0 and earlier MIT code. The published package includes the complete [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
-For differential and pinned-consumer acceptance, run `pnpm test:acceptance` with Bun 1.3.14 installed. See the CVM report for generated evidence and optional local cache inputs.
+For differential and pinned-consumer acceptance, run `pnpm test:acceptance` with Bun 1.3.14 installed. This includes a comparison with upstream v2.3.1; run that comparison alone with `pnpm test:upgrade`. CVM test files run in separate processes to isolate their relay fixtures. See the CVM report for generated evidence and optional local cache inputs.
