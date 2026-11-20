@@ -108,13 +108,11 @@ To enable validation, import [`AjvJsonSchemaValidator`](src/validation/ajv-provi
 import { Client } from '@contextvm/mcp-sdk/client';
 import { AjvJsonSchemaValidator } from '@contextvm/mcp-sdk/validation/ajv';
 
-const client = new Client(
-    { name: 'my-client', version: '1.0.0' },
-    { jsonSchemaValidator: new AjvJsonSchemaValidator() }
-);
+const client = new Client({ name: 'my-client', version: '1.0.0' }, { jsonSchemaValidator: new AjvJsonSchemaValidator() });
 ```
 
-Keeping validation opt-in means the [`ajv`](package.json) runtime is only loaded when you actually import the validator — consumers that don't need output validation ship a smaller bundle. Note that [`McpServer`](src/server/mcp.ts:72) still validates its own tool inputs/outputs against their Zod schemas directly (via Zod), independent of this optional JSON Schema validator.
+Keeping validation opt-in means the [`ajv`](package.json) runtime is only loaded when you actually import the validator — consumers that don't need output validation ship a smaller bundle. Note that [`McpServer`](src/server/mcp.ts:72) still validates its own tool inputs/outputs
+against their Zod schemas directly (via Zod), independent of this optional JSON Schema validator.
 
 These higher-level capabilities are preserved in the stdio-focused fork.
 
@@ -158,3 +156,11 @@ Issues and pull requests are welcome on GitHub at <https://github.com/ContextVM/
 ## License
 
 This project is licensed under the MIT License—see the [LICENSE](LICENSE) file for details.
+
+## Validation limits
+
+`McpServer` rejects tool arguments with more than 1,000 total array elements and object members before running schema validation. Override `maxToolInputElements` in the server options for larger legitimate inputs; use `Infinity` only with trusted callers. At most five
+asynchronous tool-input validations run concurrently per server; additional calls receive an error. The stdio read buffer separately defaults to 10 MiB.
+
+Use Zod 4.6.7 or later for constrained collection validation. Keep Node and Bun patched as well: use at least Node 22.23.4 on 22.x, Node 24.22.1 on 24.x, or Bun 1.4.4. Session IDs in the experimental in-memory task store identify task owners; applications must supply the
+authenticated transport session ID.

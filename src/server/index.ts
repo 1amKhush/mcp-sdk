@@ -58,6 +58,13 @@ import { assertToolsCallTaskCapability, assertClientRequestTaskCapability } from
 
 export type ServerOptions = ProtocolOptions & {
     /**
+     * Maximum total array elements and object members in tool arguments, checked
+     * before schema validation. Set Infinity only for trusted inputs.
+     * @default 1000
+     */
+    maxToolInputElements?: number;
+
+    /**
      * Capabilities to advertise as being supported by this server.
      */
     capabilities?: ServerCapabilities;

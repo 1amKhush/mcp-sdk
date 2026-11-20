@@ -64,6 +64,31 @@ import { ExperimentalMcpServerTasks } from '../experimental/tasks/mcp-server.js'
 import type { ToolTaskHandler } from '../experimental/tasks/interfaces.js';
 import { ZodOptional } from 'zod';
 
+// Backported from upstream v1.32.2: stop before schema error amplification.
+function toolInputElementCount(value: unknown, max: number): number {
+    let count = 0;
+    const stack = [value];
+    while (stack.length > 0) {
+        const node = stack.pop();
+        if (node === null || typeof node !== 'object') continue;
+        if (Array.isArray(node)) {
+            count += node.length;
+            if (count > max) return count;
+            for (const child of node) {
+                if (child !== null && typeof child === 'object') stack.push(child);
+            }
+            continue;
+        }
+        for (const key in node) {
+            if (!Object.prototype.hasOwnProperty.call(node, key)) continue;
+            if (++count > max) return count;
+            const child = (node as Record<string, unknown>)[key];
+            if (child !== null && typeof child === 'object') stack.push(child);
+        }
+    }
+    return count;
+}
+
 /**
  * High-level MCP server that provides a simpler API for working with resources, tools, and prompts.
  * For advanced usage (like sending notifications or setting custom request handlers), use the underlying
@@ -82,8 +107,15 @@ export class McpServer {
     private _registeredTools: { [name: string]: RegisteredTool } = {};
     private _registeredPrompts: { [name: string]: RegisteredPrompt } = {};
     private _experimental?: { tasks: ExperimentalMcpServerTasks };
+    private readonly _maxToolInputElements: number;
+    private _activeToolValidations = 0;
 
     constructor(serverInfo: Implementation, options?: ServerOptions) {
+        const max = options?.maxToolInputElements ?? 1000;
+        if (typeof max !== 'number' || Number.isNaN(max) || max < 1) {
+            throw new RangeError('maxToolInputElements must be at least 1, or Infinity');
+        }
+        this._maxToolInputElements = max;
         this.server = new Server(serverInfo, options);
     }
 
@@ -263,6 +295,15 @@ export class McpServer {
                 : undefined
             : undefined
     >(tool: Tool, args: Args, toolName: string): Promise<Args> {
+        if (
+            this._maxToolInputElements !== Infinity &&
+            toolInputElementCount(args, this._maxToolInputElements) > this._maxToolInputElements
+        ) {
+            throw new McpError(
+                ErrorCode.InvalidParams,
+                `Invalid arguments for tool ${toolName}: arguments contain more than the maximum of ${this._maxToolInputElements} elements`
+            );
+        }
         if (!tool.inputSchema) {
             return undefined as Args;
         }
@@ -271,14 +312,25 @@ export class McpServer {
         // If that fails, use the schema directly (for union/intersection/etc)
         const inputObj = normalizeObjectSchema(tool.inputSchema);
         const schemaToParse = inputObj ?? (tool.inputSchema as AnySchema);
-        const parseResult = await safeParseAsync(schemaToParse, args);
-        if (!parseResult.success) {
-            const error = 'error' in parseResult ? parseResult.error : 'Unknown error';
-            const errorMessage = getParseErrorMessage(error);
-            throw new McpError(ErrorCode.InvalidParams, `Input validation error: Invalid arguments for tool ${toolName}: ${errorMessage}`);
+        if (this._activeToolValidations >= 5) {
+            throw new McpError(ErrorCode.InvalidParams, 'Too many concurrent tool input validations');
         }
+        this._activeToolValidations++;
+        try {
+            const parseResult = await safeParseAsync(schemaToParse, args);
+            if (!parseResult.success) {
+                const error = 'error' in parseResult ? parseResult.error : 'Unknown error';
+                const errorMessage = getParseErrorMessage(error);
+                throw new McpError(
+                    ErrorCode.InvalidParams,
+                    `Input validation error: Invalid arguments for tool ${toolName}: ${errorMessage}`
+                );
+            }
 
-        return parseResult.data as unknown as Args;
+            return parseResult.data as unknown as Args;
+        } finally {
+            this._activeToolValidations--;
+        }
     }
 
     /**

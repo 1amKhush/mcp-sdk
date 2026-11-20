@@ -14,6 +14,7 @@ interface StoredTask {
     request: Request;
     requestId: RequestId;
     result?: Result;
+    sessionId?: string;
 }
 
 /**
@@ -39,7 +40,15 @@ export class InMemoryTaskStore implements TaskStore {
         return randomBytes(16).toString('hex');
     }
 
-    async createTask(taskParams: CreateTaskOptions, requestId: RequestId, request: Request, _sessionId?: string): Promise<Task> {
+    private lookup(taskId: string, sessionId?: string): StoredTask | undefined {
+        const stored = this.tasks.get(taskId);
+        if (stored && sessionId !== undefined && stored.sessionId !== undefined && stored.sessionId !== sessionId) {
+            return undefined;
+        }
+        return stored;
+    }
+
+    async createTask(taskParams: CreateTaskOptions, requestId: RequestId, request: Request, sessionId?: string): Promise<Task> {
         // Generate a unique task ID
         const taskId = this.generateTaskId();
 
@@ -64,7 +73,8 @@ export class InMemoryTaskStore implements TaskStore {
         this.tasks.set(taskId, {
             task,
             request,
-            requestId
+            requestId,
+            sessionId
         });
 
         // Schedule cleanup if ttl is specified
@@ -81,13 +91,13 @@ export class InMemoryTaskStore implements TaskStore {
         return task;
     }
 
-    async getTask(taskId: string, _sessionId?: string): Promise<Task | null> {
-        const stored = this.tasks.get(taskId);
+    async getTask(taskId: string, sessionId?: string): Promise<Task | null> {
+        const stored = this.lookup(taskId, sessionId);
         return stored ? { ...stored.task } : null;
     }
 
-    async storeTaskResult(taskId: string, status: 'completed' | 'failed', result: Result, _sessionId?: string): Promise<void> {
-        const stored = this.tasks.get(taskId);
+    async storeTaskResult(taskId: string, status: 'completed' | 'failed', result: Result, sessionId?: string): Promise<void> {
+        const stored = this.lookup(taskId, sessionId);
         if (!stored) {
             throw new Error(`Task with ID ${taskId} not found`);
         }
@@ -119,8 +129,8 @@ export class InMemoryTaskStore implements TaskStore {
         }
     }
 
-    async getTaskResult(taskId: string, _sessionId?: string): Promise<Result> {
-        const stored = this.tasks.get(taskId);
+    async getTaskResult(taskId: string, sessionId?: string): Promise<Result> {
+        const stored = this.lookup(taskId, sessionId);
         if (!stored) {
             throw new Error(`Task with ID ${taskId} not found`);
         }
@@ -132,8 +142,8 @@ export class InMemoryTaskStore implements TaskStore {
         return stored.result;
     }
 
-    async updateTaskStatus(taskId: string, status: Task['status'], statusMessage?: string, _sessionId?: string): Promise<void> {
-        const stored = this.tasks.get(taskId);
+    async updateTaskStatus(taskId: string, status: Task['status'], statusMessage?: string, sessionId?: string): Promise<void> {
+        const stored = this.lookup(taskId, sessionId);
         if (!stored) {
             throw new Error(`Task with ID ${taskId} not found`);
         }
@@ -168,9 +178,9 @@ export class InMemoryTaskStore implements TaskStore {
         }
     }
 
-    async listTasks(cursor?: string, _sessionId?: string): Promise<{ tasks: Task[]; nextCursor?: string }> {
+    async listTasks(cursor?: string, sessionId?: string): Promise<{ tasks: Task[]; nextCursor?: string }> {
         const PAGE_SIZE = 10;
-        const allTaskIds = Array.from(this.tasks.keys());
+        const allTaskIds = Array.from(this.tasks.keys()).filter(taskId => this.lookup(taskId, sessionId));
 
         let startIndex = 0;
         if (cursor) {
