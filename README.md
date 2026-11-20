@@ -108,11 +108,13 @@ To enable validation, import [`AjvJsonSchemaValidator`](src/validation/ajv-provi
 import { Client } from '@contextvm/mcp-sdk/client';
 import { AjvJsonSchemaValidator } from '@contextvm/mcp-sdk/validation/ajv';
 
-const client = new Client({ name: 'my-client', version: '1.0.0' }, { jsonSchemaValidator: new AjvJsonSchemaValidator() });
+const client = new Client(
+    { name: 'my-client', version: '1.0.0' },
+    { jsonSchemaValidator: new AjvJsonSchemaValidator() }
+);
 ```
 
-Keeping validation opt-in means the [`ajv`](package.json) runtime is only loaded when you actually import the validator — consumers that don't need output validation ship a smaller bundle. Note that [`McpServer`](src/server/mcp.ts:72) still validates its own tool inputs/outputs
-against their Zod schemas directly (via Zod), independent of this optional JSON Schema validator.
+Keeping validation opt-in means the [`ajv`](package.json) runtime is only loaded when you actually import the validator — consumers that don't need output validation ship a smaller bundle. Note that [`McpServer`](src/server/mcp.ts:72) still validates its own tool inputs/outputs against their Zod schemas directly (via Zod), independent of this optional JSON Schema validator.
 
 These higher-level capabilities are preserved in the stdio-focused fork.
 
